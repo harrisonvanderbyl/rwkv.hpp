@@ -6,7 +6,7 @@ Todos and stuff
 - [x] AVX512
 - [x] AVX512-skylake
 - [x] AVX2
-- [ ] Arm (soon)
+- [x] NEON(Arm)
 - [ ] Non-simd
 - [x] FP32
 - [x] BF16
