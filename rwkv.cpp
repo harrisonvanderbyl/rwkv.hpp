@@ -6,7 +6,7 @@
 #include "tokenizer/tokenizer.hpp"
 int main(){
     std::cout << "Hello World" << std::endl;
-    std::string path = "./1b5.safetensors";
+    std::string path = "./model.safetensors";
 
     RWKVTokenizer worldTokenizer("rwkv_vocab_v20230424.txt");
     
