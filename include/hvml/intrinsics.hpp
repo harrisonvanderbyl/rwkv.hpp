@@ -105,7 +105,7 @@
         #define SET1(x) vdupq_n_f32(x)
         #define MULTIPLY(x, y) vmulq_f32(x, y)
         #define MULTADD(x, y, z) vmlaq_f32(z, x, y)
-        #define REDUCE(x) vaddq_f32(x)
+        #define REDUCE(x) x[0] + x[1] + x[2] + x[3]
         #define ADD(x, y) vaddq_f32(x, y)
         #define MAX(x, y) vmaxq_f32(x, y)
         #define DIVIDE(x, y) vdivq_f32(x, y)
@@ -119,7 +119,33 @@
             return result;
         }
 
-        
+        #ifndef ulong
+            #define ulong uint64_t
+        #endif
+
+        #define LOADBF16(x) x
+        #define LOADFP32BF16(x) x
+
+        #define bf16_to_fp32(x) vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(vld1_u16((unsigned short*)x)), 16))
+
+        #define DOTBF16(x, y, acc) (MULTADD(bf16_to_fp32(x+16), LOAD(y),MULTADD(bf16_to_fp32(x+20), LOAD(y+4),MULTADD(bf16_to_fp32(x+24), LOAD(y+8),MULTADD(bf16_to_fp32(x+28), LOAD(y+12), MULTADD(bf16_to_fp32(x), LOAD(y+16), MULTADD(bf16_to_fp32(x+4), LOAD(y+20),MULTADD(bf16_to_fp32(x+8), LOAD(y+24),MULTADD(bf16_to_fp32(x+12), LOAD(y+28),acc)))))))))
+
+        #define DOTBF16F32(x, y, acc) (MULTADD(LOAD(x), LOAD(y),MULTADD(LOAD(x+4), LOAD(y+4), MULTADD(LOAD(x+8), LOAD(y+8), MULTADD(LOAD(x+12), LOAD(y+12), MULTADD(LOAD(x+16), LOAD(y+16),MULTADD(LOAD(x+20), LOAD(y+20),MULTADD(LOAD(x+24), LOAD(y+24),MULTADD(LOAD(x+28), LOAD(y+28),acc)))))))))
+    
+        #ifndef aligned_alloc
+         #ifdef __GNUC__
+        #define ALIGNMENT 16
+
+            inline void* aligned_alloc(size_t alignment, size_t size) {
+                void* ptr = nullptr;
+                int result = posix_memalign(&ptr, alignment, size);
+                return (result == 0) ? ptr : nullptr;
+            }
+        #else
+            #error "aligned_alloc is not supported by this compiler"
+        #endif
+        #endif
+
         // Print out the SIMD width
         #pragma message("ARM NEON is supported")
     #else
