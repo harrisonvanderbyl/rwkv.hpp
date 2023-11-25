@@ -15,7 +15,10 @@ int main(){
     std::cout << worldTokenizer.decode(tokens) << std::endl;
     std::cout << "Loading model" << std::endl;
 
-    RWKV model(path);
+    // allocating ram for 50 tokens simultaneously
+    // used for allocations of static memory usage
+
+    RWKV model(path, 1, 50);
 
     std::cout << "Model loaded" << std::endl;
 
