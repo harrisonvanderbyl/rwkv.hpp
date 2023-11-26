@@ -376,102 +376,57 @@ public:
         long OUT = Ct.shape[2];
 
 // Parallel computation
-#pragma omp parallel for collapse(2) schedule(guided, 128) shared(A, Ar, Ao, B, C)
+#pragma omp parallel for collapse(2) schedule(guided, 8) shared(A, Ar, Ao, B, C)
 
         for (long bbj = 0; bbj < BB * T; bbj += 1)
         {
-            for (long i = 0; i < OUT; i += 16)
+            for (long i = 0; i < OUT; i += 8)
             {
 
                 // __m128 testacc = _mm128_setzero_ps();
-                SIMDTYPE acc = SET1(0.0);
-                SIMDTYPE acc2 = SET1(0.0);
-                SIMDTYPE acc3 = SET1(0.0);
-                SIMDTYPE acc4 = SET1(0.0);
-                SIMDTYPE acc5 = SET1(0.0);
-                SIMDTYPE acc6 = SET1(0.0);
-                SIMDTYPE acc7 = SET1(0.0);
-                SIMDTYPE acc8 = SET1(0.0);
-                SIMDTYPE acc9 = SET1(0.0);
-                SIMDTYPE acc10 = SET1(0.0);
-                SIMDTYPE acc11 = SET1(0.0);
-                SIMDTYPE acc12 = SET1(0.0);
-                SIMDTYPE acc13 = SET1(0.0);
-                SIMDTYPE acc14 = SET1(0.0);
-                SIMDTYPE acc15 = SET1(0.0);
-                SIMDTYPE acc16 = SET1(0.0);
-                float *scale = &Ar[i];
-                float *offset = &Ao[i];
+                auto acc = UINT8ACC;
+                auto acc2 = UINT8ACC;
+                auto acc3 = UINT8ACC;
+                auto acc4 = UINT8ACC;
+                auto acc5 = UINT8ACC;
+                auto acc6 = UINT8ACC;
+                auto acc7 = UINT8ACC;
+                auto acc8 = UINT8ACC;
+                auto scale = PREPROCESSFLOATPARAMSUINT8(Ar + i);
+                auto offset = PREPROCESSFLOATPARAMSUINT8(Ao + i);
 
 #pragma unroll(16)
-                for (long k = 0; k < IN; k += SIMD_WIDTH)
+                for (long k = 0; k < IN; k += UINT8SIMDWIDTH)
                 {
-                    SIMDTYPE cxx = LOAD(B + bbj * IN + k);
                     u_int8_t *aink = A + i * IN + k;
+                    auto bbjonk = PREPROCESSFLOATINPUTUINT8(B + bbj * IN + k);
 
-                    acc = MULTADD(offset[0] + scale[0] * UINT8TOFLOAT32(aink),
-                                  cxx, acc);
-                    acc2 = MULTADD(offset[1] + scale[1] * UINT8TOFLOAT32(aink + IN),
-                                   cxx, acc2);
-                    acc3 = MULTADD(offset[2] + scale[2] * UINT8TOFLOAT32(aink + IN * 2),
-                                   cxx, acc3);
-                    acc4 = MULTADD(offset[3] + scale[3] * UINT8TOFLOAT32(aink + IN * 3),
-                                   cxx, acc4);
-                    acc5 = MULTADD(offset[4] + scale[4] * UINT8TOFLOAT32(A + (i + 4) * IN + k),
-                                   cxx,
-                                   acc5);
-                    acc6 = MULTADD(offset[5] + scale[5] * UINT8TOFLOAT32(A + (i + 5) * IN + k),
-                                   cxx,
-                                   acc6);
-                    acc7 = MULTADD(offset[6] + scale[6] * UINT8TOFLOAT32(A + (i + 6) * IN + k),
-                                   cxx,
-                                   acc7);
-                    acc8 = MULTADD(offset[7] + scale[7] * UINT8TOFLOAT32(A + (i + 7) * IN + k),
-                                   cxx,
-                                   acc8);
-                    acc9 = MULTADD(offset[8] + scale[8] * UINT8TOFLOAT32(A + (i + 8) * IN + k),
-                                   cxx,
-                                   acc9);
-                    acc10 = MULTADD(offset[9] + scale[9] * UINT8TOFLOAT32(A + (i + 9) * IN + k),
-                                    cxx,
-                                    acc10);
-                    acc11 = MULTADD(offset[10] + scale[10] * UINT8TOFLOAT32(A + (i + 10) * IN + k),
-                                    cxx,
-                                    acc11);
-                    acc12 = MULTADD(offset[11] + scale[11] * UINT8TOFLOAT32(A + (i + 11) * IN + k),
-                                    cxx,
-                                    acc12);
-                    acc13 = MULTADD(offset[12] + scale[12] * UINT8TOFLOAT32(A + (i + 12) * IN + k),
-                                    cxx,
-                                    acc13);
-                    acc14 = MULTADD(offset[13] + scale[13] * UINT8TOFLOAT32(A + (i + 13) * IN + k),
-                                    cxx,
-                                    acc14);
-                    acc15 = MULTADD(offset[14] + scale[14] * UINT8TOFLOAT32(A + (i + 14) * IN + k),
-                                    cxx,
-                                    acc15);
-                    acc16 = MULTADD(offset[15] + scale[15] * UINT8TOFLOAT32(A + (i + 15) * IN + k),
-                                    cxx,
-                                    acc16);
+                    acc = UINT8MULTADD(offset, scale, (aink),
+                                       bbjonk, acc, 0);
+                    acc2 = UINT8MULTADD(offset, scale, (aink + IN),
+                                        bbjonk, acc2, 1);
+                    acc3 = UINT8MULTADD(offset, scale, (aink + IN * 2),
+                                        bbjonk, acc3, 2);
+                    acc4 = UINT8MULTADD(offset, scale, (aink + IN * 3),
+                                        bbjonk, acc4, 3);
+                    acc5 = UINT8MULTADD(offset, scale, (aink + IN * 4),
+                                        bbjonk, acc5, 4);
+                    acc6 = UINT8MULTADD(offset, scale, (aink + IN * 5),
+                                        bbjonk, acc6, 5);
+                    acc7 = UINT8MULTADD(offset, scale, (aink + IN * 6),
+                                        bbjonk, acc7, 6);
+                    acc8 = UINT8MULTADD(offset, scale, (aink + IN * 7),
+                                        bbjonk, acc8, 7);
                 }
 
-                *(C + bbj * OUT + i + 15) = REDUCE(acc16);
-                *(C + bbj * OUT + i + 14) = REDUCE(acc15);
-                *(C + bbj * OUT + i + 13) = REDUCE(acc14);
-                *(C + bbj * OUT + i + 12) = REDUCE(acc13);
-                *(C + bbj * OUT + i + 11) = REDUCE(acc12);
-                *(C + bbj * OUT + i + 10) = REDUCE(acc11);
-                *(C + bbj * OUT + i + 9) = REDUCE(acc10);
-                *(C + bbj * OUT + i + 8) = REDUCE(acc9);
-                *(C + bbj * OUT + i + 7) = REDUCE(acc8);
-                *(C + bbj * OUT + i + 6) = REDUCE(acc7);
-                *(C + bbj * OUT + i + 5) = REDUCE(acc6);
-                *(C + bbj * OUT + i + 4) = REDUCE(acc5);
-                *(C + bbj * OUT + i + 3) = REDUCE(acc4);
-                *(C + bbj * OUT + i + 2) = REDUCE(acc3);
-                *(C + bbj * OUT + i + 1) = REDUCE(acc2);
-                *(C + bbj * OUT + i + 0) = REDUCE(acc);
-
+                *(C + bbj * OUT + i + 7) = (float)acc8;
+                *(C + bbj * OUT + i + 6) = (float)acc7;
+                *(C + bbj * OUT + i + 5) = (float)acc6;
+                *(C + bbj * OUT + i + 4) = (float)acc5;
+                *(C + bbj * OUT + i + 3) = (float)acc4;
+                *(C + bbj * OUT + i + 2) = (float)acc3;
+                *(C + bbj * OUT + i + 1) = (float)acc2;
+                *(C + bbj * OUT + i + 0) = (float)acc;
             }
         }
     }
