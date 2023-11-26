@@ -11,7 +11,7 @@ Todos and stuff
 - [x] FP32
 - [x] BF16
 - [ ] FP16
-- [ ] INT8 (soon)
+- [x] INT8
 - [ ] Cuda
 - [ ] Rocm
 - [ ] Vulkan

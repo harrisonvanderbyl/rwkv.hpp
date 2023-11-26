@@ -6,22 +6,37 @@ class TimeShift
 {
     public:
         uint shiftamount = 1;
+
         Tensor<float> state;
+        
         Tensor<float> buffer;
+        uint64_t max_batch;
+        uint64_t max_seq;
+        uint64_t dims;
         
         TimeShift(){
         }
 
-        TimeShift(ulong max_batch, ulong max_seq, ulong dims){
-            this->buffer = Tensor<float>({max_batch, max_seq, dims});
-            this->state = Tensor<float>({max_batch, 1, dims},0.0f);
+        TimeShift(const ulong max_batch, const ulong max_seq, const ulong dims){
+            std::vector<uint64_t> size = {max_batch, max_seq, dims};
+            this->buffer = Tensor<float>(size,0.0);
+            std::vector<uint64_t> state_size = {max_batch, 1UL, dims};
+            // std::cout << "TimeShift:" << state_size[0] << std::endl;
+            this->state = Tensor<float>(state_size,0.0);
+            
+            this->max_batch = max_batch;
+            this->max_seq = max_seq;
+            this->dims = dims;
+            
         }
 
-        Tensor<float> operator()(Tensor<float>& input){
+        Tensor<float> operator()(Tensor<float> input){
             auto out = Tensor<float>({input.shape[0], input.shape[1], input.shape[2]}, this->buffer.data);
             auto batches = input.shape[0];
             auto seq = input.shape[1];
             for (int i = 0; i < batches; i++){
+                
+                
                 out[i][0].clone(this->state[i][0]);
                 for (int j = 0; j < seq; j++){
                     if (j > 0){

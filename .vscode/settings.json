@@ -59,6 +59,16 @@
         "cwctype": "cpp",
         "ratio": "cpp",
         "sstream": "cpp",
-        "chrono": "cpp"
+        "chrono": "cpp",
+        "bitset": "cpp",
+        "charconv": "cpp",
+        "complex": "cpp",
+        "regex": "cpp",
+        "stop_token": "cpp",
+        "thread": "cpp",
+        "semaphore": "cpp",
+        "list": "cpp",
+        "set": "cpp",
+        "format": "cpp"
     }
 }

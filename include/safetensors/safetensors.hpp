@@ -56,6 +56,10 @@ namespace safetensors {
             return getBF16(name.c_str());
         }
         
+        Tensor<u_char> getUCHAR(const char* name);
+        Tensor<u_char> getUCHAR(std::string name){
+            return getUCHAR(name.c_str());
+        }
          
 
          /**
@@ -75,7 +79,15 @@ namespace safetensors {
         // contains key
         inline bool contains(const char* name) const {
             auto keys = this->keys();
-            return std::find(keys.begin(), keys.end(), name) != keys.end();
+            bool found = false;
+
+            for (auto key : keys){
+                if (strcmp(key, name) == 0){
+                    found = true;
+                }
+
+            }
+            return found;
         }
         inline bool contains(std::string name) const {
             return contains(name.c_str());
@@ -144,7 +156,8 @@ namespace safetensors {
             memcpy(out.data, data.data, data.data_size_in_bytes);
             return out;
         }else{
-            throw std::runtime_error("Unsupported type, try .getBfloat16()");
+
+            throw std::runtime_error("Unsupported type on getfloat "+std::string(name)+", try .getBfloat16(), data type is "+std::to_string(meta.dtype));
         }
         
     }
@@ -162,6 +175,29 @@ namespace safetensors {
             auto out = Tensor<bfloat16>(meta.shape);
             // clone all data from data_begin to out.data
             memcpy(out.data, data.data, data.data_size_in_bytes);
+            return out;
+        }
+
+        throw std::runtime_error("Unsupported type, try []");
+    }
+
+    Tensor<uint8_t> safetensors_t::getUCHAR(const char *name) {
+        const auto& meta = metas.at(name);
+        char* data_begin = const_cast<char*>(storage.data()) + meta.data_offsets.first;
+        char* data_end = const_cast<char*>(storage.data()) + meta.data_offsets.second;
+        if (meta.dtype == TENSORTYPE::kFLOAT_32){
+            throw std::runtime_error("Unsupported type, try []");
+        }
+        if (meta.dtype == TENSORTYPE::kBFLOAT_16){
+            throw std::runtime_error("Unsupported type on getChar, try .getBfloat16()");
+        }
+        if (meta.dtype == TENSORTYPE::kUINT_8){
+            auto data =  Tensor<uint8_t>(meta.shape,(uint8_t*)data_begin);
+            auto out = Tensor<uint8_t>(meta.shape);
+            // clone all data from data_begin to out.data
+            // std::cout << "data size in bytes: " << data.data_size_in_bytes << std::endl;
+            // std::cout << "shape: " << data.shape[0] << ":" << data.shape[1] << std::endl;
+            memcpy(out.data, data.data, out.data_size_in_bytes);
             return out;
         }
 

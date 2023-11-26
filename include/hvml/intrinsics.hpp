@@ -5,6 +5,7 @@
 // get pow
 #include <cmath>
 
+
 #ifdef __AVX512F__  // This macro is defined if AVX-512 is supported
   #include <immintrin.h>
   
@@ -18,6 +19,7 @@
   #define ADD(x, y) _mm512_add_ps(x, y)
   #define MAX(x, y) _mm512_max_ps(x, y)
   #define SIMDTYPE __m512
+  
   #define EXP(x) exp_ps_fill(x)
   SIMDTYPE exp_ps_fill(SIMDTYPE x){
     SIMDTYPE result = SET1(0.0f);
@@ -53,6 +55,8 @@
         #define DOTBF16F32(x, y, acc) (_mm512_fmadd_ps(LOAD(x), LOAD(y), _mm512_fmadd_ps(LOAD(x+16), LOAD(y+16), acc)))
     
     #endif
+
+    #define UINT8TOFLOAT32(x) _mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(*(__m128i *)(x)))
     // print out the SIMD width
   #pragma message("AVX-512 is supported")
 #else
@@ -60,8 +64,8 @@
   #ifdef __AVX2__
     #include <immintrin.h>
     #define SIMD_WIDTH 8
-    #define LOAD(x) _mm256_load_ps(x)
-    #define STORE(x, y) _mm256_store_ps(x, y)
+    #define LOAD(x) _mm256_loadu_ps(x)
+    #define STORE(x, y) _mm256_storeu_ps(x, y)
     #define SET1(x) _mm256_set1_ps(x)
     #define MULTIPLY(x, y) _mm256_mul_ps(x, y)
     #define MULTADD(x, y, z) _mm256_fmadd_ps(x, y, z)
@@ -95,6 +99,7 @@
 
     #define DOTBF16F32(x, y, acc) (_mm256_fmadd_ps(LOAD(x), LOAD(y), _mm256_fmadd_ps(LOAD(x+8), LOAD(y+8), _mm256_fmadd_ps(LOAD(x+16), LOAD(y+16),_mm256_fmadd_ps(LOAD(x+24), LOAD(y+24),acc)))))
     
+    #define UINT8TOFLOAT32(x) _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadu_si64(x)))
 
   #else
     #if defined(__ARM_NEON) || defined(__ARM_NEON__)
@@ -145,6 +150,8 @@
             #error "aligned_alloc is not supported by this compiler"
         #endif
         #endif
+
+        #define UINT8TOFLOAT32(x) vcvtq_f32_u32(vmovl_u16(vld1_u16((unsigned short*)x)))
 
         // Print out the SIMD width
         #pragma message("ARM NEON is supported")

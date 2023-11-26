@@ -66,10 +66,10 @@ class Tensor
 {
 public:
     DataType *data __attribute__((aligned(ALIGNMENT)));
-    unsigned long data_size_in_elements;
-    unsigned long data_size_in_bytes;
+    uint64_t data_size_in_elements;
+    uint64_t data_size_in_bytes;
 
-    std::vector<unsigned long> shape = {};
+    std::vector<uint64_t> shape = {};
 
     Tensor()
     {
@@ -78,9 +78,9 @@ public:
         this->data_size_in_bytes = 0;
     }
 
-    unsigned long get_data_size_in_elements(const std::vector<unsigned long> shape)
+    uint64_t get_data_size_in_elements(std::vector<uint64_t> shape)
     {
-        unsigned long size = 1;
+        uint64_t size = 1;
         for (int i = 0; i < shape.size(); i++)
         {
             size *= shape[i];
@@ -89,7 +89,7 @@ public:
         return size;
     }
 
-    unsigned long get_data_size_in_bytes()
+    uint64_t get_data_size_in_bytes()
     {
         return this->data_size_in_elements * sizeof(DataType);
     }
@@ -98,7 +98,7 @@ public:
     {
         auto simd_value = SET1(value);
 #pragma omp parallel for schedule(static, 256)
-        for (unsigned long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(this->data + i, simd_value);
         }
@@ -110,16 +110,20 @@ public:
         {
             throw std::runtime_error("Tensor sizes do not match during clone");
         }
-        this->shape = tensor.shape;
+        this->shape.clear();
+        for (int i = 0; i < tensor.shape.size(); i++)
+        {
+            this->shape.push_back(tensor.shape[i]);
+        }
         this->data_size_in_elements = tensor.data_size_in_elements;
         this->data_size_in_bytes = tensor.data_size_in_bytes;
-        for (unsigned long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(this->data + i, LOAD(tensor.data + i));
         }
     }
 
-    Tensor(const std::vector<unsigned long> shape)
+    Tensor(std::vector<uint64_t> shape)
     {
 
         // copy the shape
@@ -132,16 +136,23 @@ public:
         this->data_size_in_bytes = get_data_size_in_bytes();
         // make sure alignment is correct to 64 bytes
         // malloc
-        DataType *data = (DataType *)aligned_alloc(ALIGNMENT, this->data_size_in_bytes);
-        this->data = data;
+        this->data = (DataType *)aligned_alloc(ALIGNMENT, this->data_size_in_bytes);
     }
 
-    Tensor(const std::vector<unsigned long> shape, DataType value)
+    Tensor(std::vector<uint64_t> shape, DataType value)
     {
         // call the other constructor
 
         this->shape.clear();
-        this->shape.insert(this->shape.end(), shape.begin(), shape.end());
+        for (int i = 0; i < shape.size(); i++)
+        {
+            // std::cout << "shape: " << shape[i] << std::endl;
+            if (shape[i] > 59605)
+            {
+                throw std::runtime_error("Tensor size is too large");
+            }
+            this->shape.push_back(shape[i]);
+        }
         this->data_size_in_elements = get_data_size_in_elements(this->shape);
         this->data_size_in_bytes = get_data_size_in_bytes();
         // make sure alignment is correct to 64 bytes
@@ -150,7 +161,7 @@ public:
         this->fill(value);
     }
 
-    Tensor(const std::vector<unsigned long> shape, DataType *data)
+    Tensor(std::vector<uint64_t> shape, DataType *data)
     {
         this->shape.clear();
         for (int i = 0; i < shape.size(); i++)
@@ -165,7 +176,11 @@ public:
     // copy constructor
     Tensor(const Tensor<DataType> &tensor)
     {
-        this->shape = tensor.shape;
+        this->shape.clear();
+        for (int i = 0; i < tensor.shape.size(); i++)
+        {
+            this->shape.push_back(tensor.shape[i]);
+        }
         this->data_size_in_elements = tensor.data_size_in_elements;
         this->data_size_in_bytes = tensor.data_size_in_bytes;
         this->data = tensor.data;
@@ -174,7 +189,7 @@ public:
     void add(Tensor<DataType> &tensor, Tensor<DataType> &result)
     {
 #pragma omp parallel for
-        for (unsigned long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(result.data + i, ADD(LOAD(this->data + i), LOAD(tensor.data + i)));
         }
@@ -183,7 +198,7 @@ public:
     void add(Tensor<DataType> &tensor)
     {
 #pragma omp parallel for
-        for (unsigned long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(this->data + i, ADD(LOAD(this->data + i), LOAD(tensor.data + i)));
         }
@@ -192,7 +207,7 @@ public:
     void multiply(Tensor<DataType> &tensor, Tensor<DataType> &result)
     {
 #pragma omp parallel for
-        for (unsigned long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(result.data + i, MULTIPLY(LOAD(this->data + i), LOAD(tensor.data + i)));
         }
@@ -201,7 +216,7 @@ public:
     void multiply(float input, Tensor<DataType> &result)
     {
 #pragma omp parallel for
-        for (unsigned long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(result.data + i, MULTIPLY(LOAD(this->data + i), SET1(input)));
         }
@@ -210,7 +225,7 @@ public:
     void multiply(Tensor<DataType> &tensor)
     {
 #pragma omp parallel for
-        for (unsigned long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(this->data + i, MULTIPLY(LOAD(this->data + i), LOAD(tensor.data + i)));
         }
@@ -219,7 +234,7 @@ public:
     void multadd(Tensor<DataType> &tensor1, Tensor<DataType> &tensor2, Tensor<DataType> &result)
     {
 #pragma omp parallel for
-        for (unsigned long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(result.data + i, MULTADD(LOAD(this->data + i), LOAD(tensor1.data + i), LOAD(tensor2.data + i)));
         }
@@ -228,13 +243,13 @@ public:
     void multadd(Tensor<DataType> &tensor1, Tensor<DataType> &tensor2)
     {
 #pragma omp parallel for
-        for (unsigned long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(this->data + i, MULTADD(LOAD(this->data + i), LOAD(tensor1.data + i), LOAD(tensor2.data + i)));
         }
     }
 
-    void reshape(std::vector<unsigned long> new_shape)
+    void reshape(std::vector<uint64_t> new_shape)
     {
 
         this->shape.clear();
@@ -249,7 +264,7 @@ public:
         this->data_size_in_bytes = get_data_size_in_bytes();
     }
 
-    void unsafereshape(std::vector<unsigned long> new_shape)
+    void unsafereshape(std::vector<uint64_t> new_shape)
     {
 
         this->shape.clear();
@@ -266,10 +281,9 @@ public:
     void matmul(Tensor<float> &in, Tensor<float> &result, bool thisisbf16 = false)
     {
         // Pointers to the data
-        
-        // std::cout << "Is this bf16? " << thisisbf16 << std::endl;
-        // A is float* or bf16*, 
 
+        // std::cout << "Is this bf16? " << thisisbf16 << std::endl;
+        // A is float* or bf16*,
 
         // A is either bf16* or float*, check if it is bf16*
 
@@ -322,7 +336,7 @@ public:
         }
         else
         {
-            float* A = (float*)this->data;
+            float *A = (float *)this->data;
 // Parallel computation for float tensors
 #pragma omp parallel for collapse(2) schedule(dynamic, 256) shared(A, B, C)
             for (long i = 0; i < OUT; i += 1)
@@ -346,18 +360,136 @@ public:
             }
         }
     }
+    void matmul(Tensor<float> &Art, Tensor<float> &Aot,
+                Tensor<float> &Bt, Tensor<float> &Ct)
+    {
+        // Pointers to the data
+        u_char *A = (u_char *)this->data;
+        auto Ar = Art.data;
+        auto Ao = Aot.data;
+        auto B = Bt.data;
+        auto C = Ct.data;
 
-    DataType sum(){
+        long BB = Bt.shape[0];
+        long T = Bt.shape[1];
+        long IN = Bt.shape[2];
+        long OUT = Ct.shape[2];
+
+// Parallel computation
+#pragma omp parallel for collapse(2) schedule(guided, 128) shared(A, Ar, Ao, B, C)
+
+        for (long bbj = 0; bbj < BB * T; bbj += 1)
+        {
+            for (long i = 0; i < OUT; i += 16)
+            {
+
+                // __m128 testacc = _mm128_setzero_ps();
+                SIMDTYPE acc = SET1(0.0);
+                SIMDTYPE acc2 = SET1(0.0);
+                SIMDTYPE acc3 = SET1(0.0);
+                SIMDTYPE acc4 = SET1(0.0);
+                SIMDTYPE acc5 = SET1(0.0);
+                SIMDTYPE acc6 = SET1(0.0);
+                SIMDTYPE acc7 = SET1(0.0);
+                SIMDTYPE acc8 = SET1(0.0);
+                SIMDTYPE acc9 = SET1(0.0);
+                SIMDTYPE acc10 = SET1(0.0);
+                SIMDTYPE acc11 = SET1(0.0);
+                SIMDTYPE acc12 = SET1(0.0);
+                SIMDTYPE acc13 = SET1(0.0);
+                SIMDTYPE acc14 = SET1(0.0);
+                SIMDTYPE acc15 = SET1(0.0);
+                SIMDTYPE acc16 = SET1(0.0);
+                float *scale = &Ar[i];
+                float *offset = &Ao[i];
+
+#pragma unroll(16)
+                for (long k = 0; k < IN; k += SIMD_WIDTH)
+                {
+                    SIMDTYPE cxx = LOAD(B + bbj * IN + k);
+                    u_int8_t *aink = A + i * IN + k;
+
+                    acc = MULTADD(offset[0] + scale[0] * UINT8TOFLOAT32(aink),
+                                  cxx, acc);
+                    acc2 = MULTADD(offset[1] + scale[1] * UINT8TOFLOAT32(aink + IN),
+                                   cxx, acc2);
+                    acc3 = MULTADD(offset[2] + scale[2] * UINT8TOFLOAT32(aink + IN * 2),
+                                   cxx, acc3);
+                    acc4 = MULTADD(offset[3] + scale[3] * UINT8TOFLOAT32(aink + IN * 3),
+                                   cxx, acc4);
+                    acc5 = MULTADD(offset[4] + scale[4] * UINT8TOFLOAT32(A + (i + 4) * IN + k),
+                                   cxx,
+                                   acc5);
+                    acc6 = MULTADD(offset[5] + scale[5] * UINT8TOFLOAT32(A + (i + 5) * IN + k),
+                                   cxx,
+                                   acc6);
+                    acc7 = MULTADD(offset[6] + scale[6] * UINT8TOFLOAT32(A + (i + 6) * IN + k),
+                                   cxx,
+                                   acc7);
+                    acc8 = MULTADD(offset[7] + scale[7] * UINT8TOFLOAT32(A + (i + 7) * IN + k),
+                                   cxx,
+                                   acc8);
+                    acc9 = MULTADD(offset[8] + scale[8] * UINT8TOFLOAT32(A + (i + 8) * IN + k),
+                                   cxx,
+                                   acc9);
+                    acc10 = MULTADD(offset[9] + scale[9] * UINT8TOFLOAT32(A + (i + 9) * IN + k),
+                                    cxx,
+                                    acc10);
+                    acc11 = MULTADD(offset[10] + scale[10] * UINT8TOFLOAT32(A + (i + 10) * IN + k),
+                                    cxx,
+                                    acc11);
+                    acc12 = MULTADD(offset[11] + scale[11] * UINT8TOFLOAT32(A + (i + 11) * IN + k),
+                                    cxx,
+                                    acc12);
+                    acc13 = MULTADD(offset[12] + scale[12] * UINT8TOFLOAT32(A + (i + 12) * IN + k),
+                                    cxx,
+                                    acc13);
+                    acc14 = MULTADD(offset[13] + scale[13] * UINT8TOFLOAT32(A + (i + 13) * IN + k),
+                                    cxx,
+                                    acc14);
+                    acc15 = MULTADD(offset[14] + scale[14] * UINT8TOFLOAT32(A + (i + 14) * IN + k),
+                                    cxx,
+                                    acc15);
+                    acc16 = MULTADD(offset[15] + scale[15] * UINT8TOFLOAT32(A + (i + 15) * IN + k),
+                                    cxx,
+                                    acc16);
+                }
+
+                *(C + bbj * OUT + i + 15) = REDUCE(acc16);
+                *(C + bbj * OUT + i + 14) = REDUCE(acc15);
+                *(C + bbj * OUT + i + 13) = REDUCE(acc14);
+                *(C + bbj * OUT + i + 12) = REDUCE(acc13);
+                *(C + bbj * OUT + i + 11) = REDUCE(acc12);
+                *(C + bbj * OUT + i + 10) = REDUCE(acc11);
+                *(C + bbj * OUT + i + 9) = REDUCE(acc10);
+                *(C + bbj * OUT + i + 8) = REDUCE(acc9);
+                *(C + bbj * OUT + i + 7) = REDUCE(acc8);
+                *(C + bbj * OUT + i + 6) = REDUCE(acc7);
+                *(C + bbj * OUT + i + 5) = REDUCE(acc6);
+                *(C + bbj * OUT + i + 4) = REDUCE(acc5);
+                *(C + bbj * OUT + i + 3) = REDUCE(acc4);
+                *(C + bbj * OUT + i + 2) = REDUCE(acc3);
+                *(C + bbj * OUT + i + 1) = REDUCE(acc2);
+                *(C + bbj * OUT + i + 0) = REDUCE(acc);
+
+            }
+        }
+    }
+    DataType sum()
+    {
         DataType sum = 0;
-        for (int i = 0; i < this->data_size_in_elements; i++){
+        for (int i = 0; i < this->data_size_in_elements; i++)
+        {
             sum += this->data[i];
         }
         return sum;
     }
 
-    DataType expsum(){
+    DataType expsum()
+    {
         DataType sum = 0;
-        for (int i = 0; i < this->data_size_in_elements; i++){
+        for (int i = 0; i < this->data_size_in_elements; i++)
+        {
             sum += exp(this->data[i]);
         }
         return sum;
@@ -371,8 +503,6 @@ public:
         // Dimensions
         auto dim = this->data_size_in_elements;
 
-        
-
         // Parallel computation
 
         auto sum = this->expsum();
@@ -383,11 +513,9 @@ public:
         {
             STORE(A + i, DIVIDE(EXP(LOAD(A + i)), sumhold));
         }
-
     }
 
-
-    void gather(std::vector<std::vector<unsigned long>> indicies, Tensor<DataType> &buffer)
+    void gather(std::vector<std::vector<ulong>> indicies, Tensor<DataType> &buffer)
     {
         // Assume copy
 
@@ -435,7 +563,7 @@ public:
 
     void layernorm(const Tensor<DataType> &weight, const Tensor<DataType> &bias, const Tensor<DataType> &result)
     {
-        unsigned long BTT = 1;
+        uint64_t BTT = 1;
 
         if (this->shape.size() > 1)
         {
@@ -445,7 +573,7 @@ public:
             }
         }
 
-        unsigned long OUT = this->shape[this->shape.size() - 1];
+        uint64_t OUT = this->shape[this->shape.size() - 1];
 
         // confirm result length
         // std::cout << "result.data_size_in_elements: " << result.data_size_in_elements << std::endl;
@@ -460,17 +588,17 @@ public:
         auto B = bias.data;
         auto C = result.data;
 
-        for (unsigned long i = 0; i < BTT; i += 1)
+        for (uint64_t i = 0; i < BTT; i += 1)
         {
             float mean = 0.0f;
             float var = 0.0f;
-            for (unsigned long j = 0; j < OUT; j += SIMD_WIDTH)
+            for (uint64_t j = 0; j < OUT; j += SIMD_WIDTH)
             {
                 mean += REDUCE(LOAD(A + i * OUT + j));
             }
             mean /= OUT;
 
-            for (unsigned long j = 0; j < OUT; j += SIMD_WIDTH)
+            for (uint64_t j = 0; j < OUT; j += SIMD_WIDTH)
             {
                 auto acc = ADD(LOAD(A + i * OUT + j), SET1(-1.0f * mean));
                 acc = MULTIPLY(acc, acc);
@@ -478,7 +606,7 @@ public:
             }
             var /= OUT;
 
-            for (unsigned long j = 0; j < OUT; j += SIMD_WIDTH)
+            for (uint64_t j = 0; j < OUT; j += SIMD_WIDTH)
             {
                 // std::cout << "level1: " <<j<< std::endl;
                 auto acc = ADD(LOAD(A + i * OUT + j), SET1(-1.0f * mean));
@@ -580,7 +708,7 @@ public:
         // 2d
         int64_t hhsize = (C / H) * (C / H);
 
-        #pragma omp parallel for collapse(2) schedule(guided,64) shared(kk, vv, ww, uu, rr, ss, out)
+#pragma omp parallel for collapse(2) schedule(guided, 64) shared(kk, vv, ww, uu, rr, ss, out)
         for (int64_t bb = 0; bb < B; bb++)
         {
             for (int64_t t = 0; t < T; t++)
@@ -638,10 +766,10 @@ public:
     }
 
     // [] operator
-    Tensor<DataType> operator[](const unsigned long index)
+    Tensor<DataType> operator[](const uint64_t index)
     {
-        unsigned long stride = 1;
-        std::vector<unsigned long> new_shape = {};
+        uint64_t stride = 1;
+        std::vector<uint64_t> new_shape = {};
         for (int i = 1; i < this->shape.size(); i++)
         {
             stride *= this->shape[i];
