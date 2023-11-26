@@ -376,7 +376,7 @@ public:
         long OUT = Ct.shape[2];
 
 // Parallel computation
-#pragma omp parallel for collapse(2) schedule(guided, 8) shared(A, Ar, Ao, B, C)
+#pragma omp parallel for collapse(2) schedule(dynamic, UINT8THREADALLOC) shared(A, Ar, Ao, B, C)
 
         for (long bbj = 0; bbj < BB * T; bbj += 1)
         {
@@ -419,14 +419,14 @@ public:
                                         bbjonk, acc8, 7);
                 }
 
-                *(C + bbj * OUT + i + 7) = (float)acc8;
-                *(C + bbj * OUT + i + 6) = (float)acc7;
-                *(C + bbj * OUT + i + 5) = (float)acc6;
-                *(C + bbj * OUT + i + 4) = (float)acc5;
-                *(C + bbj * OUT + i + 3) = (float)acc4;
-                *(C + bbj * OUT + i + 2) = (float)acc3;
-                *(C + bbj * OUT + i + 1) = (float)acc2;
-                *(C + bbj * OUT + i + 0) = (float)acc;
+                *(C + bbj * OUT + i + 7) = UINT8POSTREDUCE(acc8);
+                *(C + bbj * OUT + i + 6) = UINT8POSTREDUCE(acc7);
+                *(C + bbj * OUT + i + 5) = UINT8POSTREDUCE(acc6);
+                *(C + bbj * OUT + i + 4) = UINT8POSTREDUCE(acc5);
+                *(C + bbj * OUT + i + 3) = UINT8POSTREDUCE(acc4);
+                *(C + bbj * OUT + i + 2) = UINT8POSTREDUCE(acc3);
+                *(C + bbj * OUT + i + 1) = UINT8POSTREDUCE(acc2);
+                *(C + bbj * OUT + i + 0) = UINT8POSTREDUCE(acc);
             }
         }
     }
