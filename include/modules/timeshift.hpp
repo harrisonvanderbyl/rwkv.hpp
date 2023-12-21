@@ -10,44 +10,70 @@ class TimeShift
         Tensor<float> state;
         
         Tensor<float> buffer;
-        uint64_t max_batch;
-        uint64_t max_seq;
-        uint64_t dims;
+        ulong max_batch;
+        ulong max_seq;
+        ulong dims;
         
         TimeShift(){
         }
 
-        TimeShift(const ulong max_batch, const ulong max_seq, const ulong dims){
-            std::vector<uint64_t> size = {max_batch, max_seq, dims};
-            this->buffer = Tensor<float>(size,0.0);
-            std::vector<uint64_t> state_size = {max_batch, 1UL, dims};
+        TimeShift(const ulong max_batchi, const ulong max_seqi, const ulong dimsi){
+            std::vector<ulong> size = {max_batchi, max_seqi, dimsi};
+            this->buffer = Tensor<float>(size,0.0f);
+            std::vector<ulong> state_size = {max_batchi, 1UL, dimsi};
             // std::cout << "TimeShift:" << state_size[0] << std::endl;
-            this->state = Tensor<float>(state_size,0.0);
+            this->state = Tensor<float>(state_size,0.0f);
             
-            this->max_batch = max_batch;
-            this->max_seq = max_seq;
-            this->dims = dims;
+            this->max_batch = max_batchi;
+            this->max_seq = max_seqi;
+            this->dims = dimsi;
             
         }
 
         Tensor<float> operator()(Tensor<float> input){
-            auto out = Tensor<float>({input.shape[0], input.shape[1], input.shape[2]}, this->buffer.data);
+            this->buffer.unsafereshape({input.shape[0], input.shape[1], input.shape[2]});
             auto batches = input.shape[0];
             auto seq = input.shape[1];
-            for (int i = 0; i < batches; i++){
-                
-                
-                out[i][0].clone(this->state[i][0]);
-                for (int j = 0; j < seq; j++){
-                    if (j > 0){
-                        out[i][j].clone(input[i][j-1]);
-                    }
-                    else{
-                        this->state[i][0].clone(input[i][seq-1]);
+
+            if (this->buffer.device.device_type.i == KHVMLCPU.i){
+                for (size_t i = 0; i < batches; i++){
+                    this->buffer[i][0].clone(this->state[i][0]);
+                    for (size_t j = 0; j < seq; j++){
+                        if (j > 0){
+                            this->buffer[i][j].clone(input[i][j-1]);
+                        }
+                        else{
+                            this->state[i][0].clone(input[i][seq-1]);
+                        }
                     }
                 }
             }
-            return out;            
+            else{
+
+                auto B = input.data;
+                auto C = this->buffer.data;
+                auto A = this->state.data;
+
+                auto Batch = input.shape[0];
+                auto Seq = input.shape[1];
+                auto Out = input.shape[2];
+
+                // vuda
+                auto stream_id = 0;
+                auto kernalparams = vuda::dim3(Batch, 1, 1);
+                vuda::launchKernel("./shaders/timeshift.glsl.spv", "main", stream_id, kernalparams, Batch, Seq, Out,1, A, B, C);
+                vuda::streamSynchronize(stream_id);
+                
+            }
+
+
+            return this->buffer;            
+        }
+
+
+        void toVulkan(){
+            this->state.sendToVulkan();
+            this->buffer.sendToVulkan();
         }
 
 };

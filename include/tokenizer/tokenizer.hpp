@@ -26,18 +26,17 @@ public:
         std::ifstream file(fileName);
         std::string line;
         std::vector<std::vector<uchar>> sorted;
-        ulong lastintprog = 0;
         std::vector<std::string> filelines;
         while (std::getline(file, line)) {
             // get progress without changing the file position
-            float progress = (float)file.tellg() / (float)std::filesystem::file_size(fileName);
-            if ((ulong)(progress * 100) > lastintprog) {
-                lastintprog = (ulong)(progress * 100);
-                // flush
-                std::cout.flush();
-                std::cout << "%\r" << "Loading token file:[" << std::string(lastintprog / 2, '=') << std::string(50 - lastintprog / 2, ' ') << "] " << lastintprog ;
+            // float progress = (float)file.tellg() / (float)std::filesystem::file_size(fileName);
+            // if ((ulong)(progress * 100) > lastintprog) {
+            //     lastintprog = (ulong)(progress * 100);
+            //     // flush
+            //     std::cout.flush();
+            //     std::cout << "%\r" << "Loading token file:[" << std::string(lastintprog / 2, '=') << std::string(50 - lastintprog / 2, ' ') << "] " << lastintprog ;
                 
-            }
+            // }
 
             filelines.push_back(std::move(line));
         }
@@ -45,25 +44,25 @@ public:
         std::cout << std::endl;
         
         
-        #pragma omp parallel for schedule(static, 1) shared(filelines, sorted, idx2token)
-        for (int i = 0; i < filelines.size(); i++) {
+        // #pragma omp parallel for schedule(static, 1) shared(filelines, sorted, idx2token)
+        for (size_t io = 0; io < filelines.size(); io++) {
             
             //progress
             
 
-            std::string line = filelines[i];
-            size_t idxSpace = line.find(' ');
-            int idx = std::stoi(line.substr(0, idxSpace));
-            auto x = findPythonByteObjects(line.substr(idxSpace + 1, line.rfind(' ') - idxSpace - 1));
+            std::string nline = filelines[io];
+            size_t idxSpace = nline.find(' ');
+            int idx = std::stoi(nline.substr(0, idxSpace));
+            auto x = findPythonByteObjects(nline.substr(idxSpace + 1, nline.rfind(' ') - idxSpace - 1));
             if (x.size() == 0) {
                 // decode the string as utf-8
-                auto line2 = line.substr(idxSpace + 2, line.rfind(' ') - idxSpace - 3);
-                // std::cout << line2 << std::endl;
+                auto nline2 = nline.substr(idxSpace + 2, nline.rfind(' ') - idxSpace - 3);
+                // std::cout << nline2 << std::endl;
                 
-                x = std::vector<uchar>(line2.begin(), line2.end());
+                x = std::vector<uchar>(nline2.begin(), nline2.end());
             }
 
-            for (int i = 0; i < x.size(); i++) {
+            for (size_t i = 0; i < x.size(); i++) {
                     if (x[i] == '\\') {
                         switch (x[i + 1]) {
                         case 'n':
@@ -99,14 +98,14 @@ public:
             }
             
             // sorted.push_back(x)
-            #pragma omp critical
+            // #pragma omp critical
             {
                 sorted.push_back(x);
             }
             
         
             // idx2token[idx] = x;
-            #pragma omp critical
+            // #pragma omp critical
             {
                 idx2token[idx] = x;
             }
@@ -160,15 +159,15 @@ public:
     // Sample print function based on printTokens
     void printTokens(const std::vector<ulong>& tokens) {
         for (auto i : tokens) {
-            try {
+            // try {
                 std::vector<uchar> s = idx2token[i];
                 std::string str(s.begin(), s.end());
                 std::cout << "\"" << str << "\"" << i << " ";
-            } catch (...) {
-                // If the conversion to string fails, keep it in some other format.
-                // Note: Better error handling is needed
-                std::cout << "Error" << i << " ";
-            }
+            // } catch (...) {
+            //     // If the conversion to string fails, keep it in some other format.
+            //     // Note: Better error handling is needed
+            //     std::cout << "Error" << i << " ";
+            // }
         }
         std::cout << std::endl;
     }

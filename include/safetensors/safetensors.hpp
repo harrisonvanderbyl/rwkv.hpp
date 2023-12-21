@@ -27,13 +27,15 @@ namespace safetensors {
      *
      */
     class safetensors_t {
-    private:
-        const std::unordered_map<std::string, const metadata_t> metas;
-        const std::vector<char> storage;
 
     public:
-        safetensors_t(std::unordered_map<std::string, const metadata_t> &, std::vector<char> &);
 
+        const std::unordered_map<std::string, const metadata_t> metas;
+        
+        safetensors_t(std::unordered_map<std::string, const metadata_t> &metasa, std::vector<char> &storagea)
+            : metas(metasa), storage(storagea) {}
+
+        const std::vector<char> storage;
         /**
          *
          * @return
@@ -142,22 +144,22 @@ namespace safetensors {
         return {metas_table, tensors_storage};
     }
 
-    safetensors_t::safetensors_t(std::unordered_map<std::string, const metadata_t> &metas, std::vector<char> &storage)
-            : metas(metas), storage(storage) {}
+    
 
     
     Tensor<float> safetensors_t::operator[](const char *name) const {
         const auto& meta = metas.at(name);
         char* data_begin = const_cast<char*>(storage.data()) + meta.data_offsets.first;
-        char* data_end = const_cast<char*>(storage.data()) + meta.data_offsets.second;
+        // char* data_end = const_cast<char*>(storage.data()) + meta.data_offsets.second;
         if (meta.dtype == TENSORTYPE::kFLOAT_32){
             auto data =  Tensor<float>(meta.shape,(float*)data_begin);
             auto out = Tensor<float>(meta.shape);
             memcpy(out.data, data.data, data.data_size_in_bytes);
             return out;
         }else{
-
-            throw std::runtime_error("Unsupported type on getfloat "+std::string(name)+", try .getBfloat16(), data type is "+std::to_string(meta.dtype));
+            std::cout << "Unsupported type on getfloat "+std::string(name)+", try .getBfloat16(), data type is "+std::to_string(meta.dtype) << std::endl;
+            return Tensor<float>(meta.shape);
+            // throw std::runtime_error("Unsupported type on getfloat "+std::string(name)+", try .getBfloat16(), data type is "+std::to_string(meta.dtype));
         }
         
     }
@@ -166,9 +168,11 @@ namespace safetensors {
     Tensor<bfloat16> safetensors_t::getBF16(const char *name) {
         const auto& meta = metas.at(name);
         char* data_begin = const_cast<char*>(storage.data()) + meta.data_offsets.first;
-        char* data_end = const_cast<char*>(storage.data()) + meta.data_offsets.second;
+        // char* data_end = const_cast<char*>(storage.data()) + meta.data_offsets.second;
         if (meta.dtype == TENSORTYPE::kFLOAT_32){
-            throw std::runtime_error("Unsupported type, try []");
+            // throw std::runtime_error("Unsupported type, try []");
+            std::cout << "Unsupported type on getBfloat16 "+std::string(name)+", try .getfloat(), data type is "+std::to_string(meta.dtype) << std::endl;
+            return Tensor<bfloat16>(meta.shape);
         }
         if (meta.dtype == TENSORTYPE::kBFLOAT_16){
             auto data =  Tensor<bfloat16>(meta.shape,(bfloat16*)data_begin);
@@ -178,18 +182,24 @@ namespace safetensors {
             return out;
         }
 
-        throw std::runtime_error("Unsupported type, try []");
+        // throw std::runtime_error("Unsupported type, try []");
+        std::cout << "Unsupported type on getBfloat16 "+std::string(name)+", try .getfloat(), data type is "+std::to_string(meta.dtype) << std::endl;
+        return Tensor<bfloat16>(meta.shape);
     }
 
     Tensor<uint8_t> safetensors_t::getUCHAR(const char *name) {
         const auto& meta = metas.at(name);
         char* data_begin = const_cast<char*>(storage.data()) + meta.data_offsets.first;
-        char* data_end = const_cast<char*>(storage.data()) + meta.data_offsets.second;
+        // char* data_end = const_cast<char*>(storage.data()) + meta.data_offsets.second;
         if (meta.dtype == TENSORTYPE::kFLOAT_32){
-            throw std::runtime_error("Unsupported type, try []");
+            // throw std::runtime_error("Unsupported type, try []");
+            std::cout << "Unsupported type on getChar "+std::string(name)+", try .getfloat(), data type is "+std::to_string(meta.dtype) << std::endl;
+            return Tensor<uint8_t>(meta.shape);
         }
         if (meta.dtype == TENSORTYPE::kBFLOAT_16){
-            throw std::runtime_error("Unsupported type on getChar, try .getBfloat16()");
+            // throw std::runtime_error("Unsupported type on getChar, try .getBfloat16()");
+            std::cout << "Unsupported type on getChar "+std::string(name)+", try .getBfloat16(), data type is "+std::to_string(meta.dtype) << std::endl;
+            return Tensor<uint8_t>(meta.shape);
         }
         if (meta.dtype == TENSORTYPE::kUINT_8){
             auto data =  Tensor<uint8_t>(meta.shape,(uint8_t*)data_begin);
@@ -201,7 +211,9 @@ namespace safetensors {
             return out;
         }
 
-        throw std::runtime_error("Unsupported type, try []");
+        // throw std::runtime_error("Unsupported type, try []");
+        std::cout << "Unsupported type on getChar "+std::string(name)+", try .getfloat(), data type is "+std::to_string(meta.dtype) << std::endl;
+        return Tensor<uint8_t>(meta.shape);
     }
 
     // Tensor<bfloat16> safetensors_t::operator[](const char *name) const {

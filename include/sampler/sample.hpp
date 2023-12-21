@@ -21,7 +21,7 @@ int typical(float* _logits, float _temp = 0.9, float _tau = 0.8)
     auto mask = (cumulative_probs < tau);
     // convert mask to int
     nc::NdArray<int> mask_int = nc::NdArray<int>(1,mask.size());
-    for (int i = 0; i < mask.size(); i++) {
+    for (uint64_t i = 0; i < mask.size(); i++) {
         mask_int[i] = mask[i];
     }
 

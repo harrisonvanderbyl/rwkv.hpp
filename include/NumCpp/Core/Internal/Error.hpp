@@ -55,6 +55,7 @@ namespace nc::error
         std::string errMsg =
             "File: " + file + "\n\tFunction: " + function + "\n\tLine: " + std::to_string(line) + "\n\tError: " + msg;
         std::cerr << errMsg;
-        throw ErrorType(errMsg);
+        // throw ErrorType(errMsg);
+        std::cout << errMsg << std::endl;
     }
 } // namespace nc::error

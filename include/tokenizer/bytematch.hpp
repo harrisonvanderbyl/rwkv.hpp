@@ -10,9 +10,9 @@
 #define uchar unsigned char
 
 std::vector<uchar> hexToBytes(const std::string &hexString) {
-    if (hexString.length() % 2 != 0) {
-        throw std::runtime_error("Invalid hex string length for conversion to bytes.");
-    }
+    // if (hexString.length() % 2 != 0) {
+    //     throw std::runtime_error("Invalid hex string length for conversion to bytes.");
+    // }
     
     size_t len = hexString.length() / 2;
     std::vector<uchar> bytes;

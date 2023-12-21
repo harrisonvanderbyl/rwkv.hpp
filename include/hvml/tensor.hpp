@@ -9,9 +9,35 @@
 
 #include "nlohmann/json.hpp"
 
+
+// #include <vuda_runtime.hpp>
+// test if vulkan is enabled by seeing if <vulkan/vulkan.h> exists
+#if __has_include(<vulkan/vulkan.h>)
+    #include <vuda_runtime.hpp>
+#else
+    #pragma message("Vulkan library not found, not building with vulkan")
+    #define cudaGetErrorString(x) "error"
+    #define cudaMemcpy(...) "error"; throw std::runtime_error("Not built with vulkan");
+    #define cudaMalloc(...) "error"; throw std::runtime_error("Not built with vulkan");
+    #define cudaSuccess 0
+    #define cudaError_t int
+    #define cudaMallocManaged(x) "error"; throw std::runtime_error("Not built with vulkan");
+    #define cudaSetDevice(x) "error"; throw std::runtime_error("Not built with vulkan");
+    #define vuda 0;std
+    #define streamSynchronize cout << "error"; throw std::runtime_error("Not built with vulkan");
+    #define launchKernel(...) cout << "error"; throw std::runtime_error("Not built with vulkan");
+    #define dim3(...) cout << "error"; throw std::runtime_error("Not built with vulkan");
+    #define dim3 cout << "error"; 
+#endif
+
 #define ALIGNMENT 64
 
 #define bfloat16 short
+
+
+
+
+
 
 enum TENSORTYPE
 {
@@ -44,6 +70,24 @@ enum TENSORTYPE
 
 };
 
+typedef struct{uint16_t i;} HVMLCPU;
+typedef struct{uint16_t i;} HVMLVULKAN;
+typedef struct{uint16_t i;} HVMLDYNAMIC;
+
+
+HVMLCPU KHVMLCPU = {0};
+HVMLVULKAN KHVMLVULKAN = {1};
+
+template <typename INP = HVMLCPU>
+struct VKTensorInfo
+{
+    struct{u_int16_t i;} device_type = KHVMLCPU;
+    int offset = 0;
+};
+
+
+
+
 NLOHMANN_JSON_SERIALIZE_ENUM(TENSORTYPE, {
                                              {kBOOL, "BOOL"},
                                              {kUINT_8, "U8"},
@@ -61,46 +105,121 @@ NLOHMANN_JSON_SERIALIZE_ENUM(TENSORTYPE, {
                                          })
 
 // can be float, double, int, etc.
-template <typename DataType>
+template <typename DataType, typename DeviceData = HVMLDYNAMIC>
 class Tensor
 {
 public:
-    DataType *data __attribute__((aligned(ALIGNMENT)));
-    uint64_t data_size_in_elements;
-    uint64_t data_size_in_bytes;
+    // DataType *data __attribute__((aligned(ALIGNMENT)));
+    // DataType if DeviceData is HVMLCPU
+    // VKTensorInfo if DeviceData is VKTensorInfo
+    DataType* data __attribute__((aligned(ALIGNMENT)));
+    ulong data_size_in_elements;
+    ulong data_size_in_bytes;
+    ulong total_original_allocated_bytes;
 
-    std::vector<uint64_t> shape = {};
+    VKTensorInfo<DeviceData> device = {
+        .device_type = {
+            .i = KHVMLCPU.i,
+        },
+        .offset = 0,
+    };
+
+    std::vector<ulong> shape = {};
 
     Tensor()
     {
         this->data = nullptr;
         this->data_size_in_elements = 0;
         this->data_size_in_bytes = 0;
+        this->total_original_allocated_bytes = 0;
     }
 
-    uint64_t get_data_size_in_elements(std::vector<uint64_t> shape)
+    ulong get_data_size_in_elements(std::vector<ulong> shapea)
     {
-        uint64_t size = 1;
-        for (int i = 0; i < shape.size(); i++)
+        ulong size = 1;
+        for (size_t i = 0; i < shapea.size(); i++)
         {
-            size *= shape[i];
+            size *= shapea[i];
         }
         this->data_size_in_elements = size;
         return size;
     }
 
-    uint64_t get_data_size_in_bytes()
+    ulong get_data_size_in_bytes()
     {
         return this->data_size_in_elements * sizeof(DataType);
     }
 
     void fill(DataType value)
     {
-        auto simd_value = SET1(value);
-#pragma omp parallel for schedule(static, 256)
-        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        // fill data with value using std::fill
+        if (this->device.device_type.i == KHVMLCPU.i){
+        std::fill(this->data, this->data + this->data_size_in_elements, value);
+        }
+        else{
+            auto stream_id = 0;
+            const int CHUNKSIZE = 256;
+            auto kernalparams = vuda::dim3(this->data_size_in_elements/CHUNKSIZE, 1, 1);
+            vuda::launchKernel("./shaders/set1.glsl.spv", "main", stream_id, kernalparams, this->data_size_in_elements, CHUNKSIZE, value, this->data);
+            vuda::streamSynchronize(stream_id);
+        }
+    }
+
+    
+
+    TENSORTYPE get_type()
+    {
+        if (std::is_same<DataType, bool>::value)
         {
-            STORE(this->data + i, simd_value);
+            return kBOOL;
+        }
+        else if (std::is_same<DataType, uint8_t>::value)
+        {
+            return kUINT_8;
+        }
+        else if (std::is_same<DataType, int8_t>::value)
+        {
+            return kINT_8;
+        }
+        else if (std::is_same<DataType, int16_t>::value)
+        {
+            return kINT_16;
+        }
+        else if (std::is_same<DataType, uint16_t>::value)
+        {
+            return kUINT_16;
+        }
+        else if (std::is_same<DataType, float>::value)
+        {
+            return kFLOAT_32;
+        }
+        else if (std::is_same<DataType, double>::value)
+        {
+            return kFLOAT_64;
+        }
+        else if (std::is_same<DataType, int32_t>::value)
+        {
+            return kINT_32;
+        }
+        else if (std::is_same<DataType, uint32_t>::value)
+        {
+            return kUINT_32;
+        }
+        else if (std::is_same<DataType, int64_t>::value)
+        {
+            return kINT_64;
+        }
+        else if (std::is_same<DataType, ulong>::value)
+        {
+            return kUINT_64;
+        }
+        else if (std::is_same<DataType, bfloat16>::value)
+        {
+            return kBFLOAT_16;
+        }
+        else
+        {
+            throw std::runtime_error("Unknown type");
         }
     }
 
@@ -108,153 +227,255 @@ public:
     {
         if (this->data_size_in_bytes != tensor.data_size_in_bytes)
         {
-            throw std::runtime_error("Tensor sizes do not match during clone");
+            // throw std::runtime_error("Tensor sizes do not match during clone");
+            std::cout << "Tensor sizes do not match during clone" << std::endl;
+
         }
         this->shape.clear();
-        for (int i = 0; i < tensor.shape.size(); i++)
+        for (size_t i = 0; i < tensor.shape.size(); i++)
         {
             this->shape.push_back(tensor.shape[i]);
         }
         this->data_size_in_elements = tensor.data_size_in_elements;
         this->data_size_in_bytes = tensor.data_size_in_bytes;
-        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        for (ulong i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(this->data + i, LOAD(tensor.data + i));
         }
     }
 
-    Tensor(std::vector<uint64_t> shape)
+    template <typename Odata = DataType>
+    Tensor<Odata,HVMLVULKAN> sendToVulkan()
+    {
+        if (this->device.device_type.i == KHVMLVULKAN.i)
+        {
+            return *(Tensor<Odata,HVMLVULKAN>*)this;
+        }
+
+        this->data_size_in_bytes = this->data_size_in_elements * sizeof(Odata);
+
+        Odata* dataa;
+
+        auto allocerror = cudaMalloc((void**)&dataa, this->total_original_allocated_bytes);
+
+        if (allocerror != cudaSuccess)
+        {
+            std::cout << "cudaMalloc failed: " << cudaGetErrorString(allocerror) << std::endl;
+        }
+
+        auto memerror = cudaMemcpy(dataa, (DataType*)this->data, this->data_size_in_bytes, cudaMemcpyHostToDevice);
+
+        if (memerror != cudaSuccess)
+        {
+            std::cout << "cudaMemcpy failed: " << cudaGetErrorString(memerror) << std::endl;
+        }
+
+        // create vulkan tensor info
+    
+        this->data = (DataType*)dataa;
+        this->device.device_type.i = KHVMLVULKAN.i;
+
+
+        return *(Tensor<Odata,HVMLVULKAN>*)(this);
+        
+       
+    }
+
+   
+    Tensor<DataType> receiveFromVulkan()
+    {
+        if (this->device.device_type.i == KHVMLCPU.i)
+        {
+            return *(Tensor<DataType>*)this;
+        }
+        // create host tensor
+        DataType* host_data = (DataType*)malloc(this->data_size_in_bytes);
+
+        // copy data from vulkan tensor to host tensor
+        auto error = cudaMemcpy(host_data,this->data, this->data_size_in_bytes, cudaMemcpyDeviceToHost);
+
+        if (error != cudaSuccess)
+        {
+            std::cout << "cudaMemcpy failed: " << cudaGetErrorString(error) << std::endl;
+        }
+        // return host tensor
+        this->data = host_data;
+        this->device.device_type.i = KHVMLCPU.i;
+
+        // std::cout << "receiveFromVulkan: " << this->data_size_in_bytes << std::endl;
+        // std::cout << "this->data: " << *(this->data) << std::endl;
+
+        return *(Tensor<DataType>*)this;
+
+    }
+
+
+    void unloadVKBuffer(Tensor<float> &buffer)
+    {
+
+        if (this->device.device_type.i == KHVMLCPU.i)
+        {
+            buffer.clone(*(Tensor<DataType>*)this);
+            return;
+        }
+        // copy data from vulkan tensor to host tensor
+        auto error = cudaMemcpy(buffer.data, this->data, this->data_size_in_bytes, cudaMemcpyDeviceToHost);
+
+        if (error != cudaSuccess)
+        {
+            std::cout << "cudaMemcpy failed: " << cudaGetErrorString(error) << std::endl;
+        }
+    }
+
+    void loadVKBuffer(Tensor<float> &buffer)
+    {
+        if (this->device.device_type.i == KHVMLCPU.i)
+        {
+            this->clone(*(Tensor<DataType>*)&buffer);
+            return;
+        }
+        // copy data from vulkan tensor to host tensor
+        auto error = cudaMemcpy(this->data, buffer.data, this->data_size_in_bytes, cudaMemcpyHostToDevice);
+
+        if (error != cudaSuccess)
+        {
+            std::cout << "cudaMemcpy failed: " << cudaGetErrorString(error) << std::endl;
+        }
+    }
+
+    Tensor(std::vector<ulong> shapea)
     {
 
         // copy the shape
         this->shape.clear();
-        for (int i = 0; i < shape.size(); i++)
+        for (size_t i = 0; i < shapea.size(); i++)
         {
-            this->shape.push_back(shape[i]);
+            this->shape.push_back(shapea[i]);
         }
         this->data_size_in_elements = get_data_size_in_elements(this->shape);
         this->data_size_in_bytes = get_data_size_in_bytes();
+        this->total_original_allocated_bytes = this->data_size_in_bytes;
+
         // make sure alignment is correct to 64 bytes
         // malloc
         this->data = (DataType *)aligned_alloc(ALIGNMENT, this->data_size_in_bytes);
     }
 
-    Tensor(std::vector<uint64_t> shape, DataType value)
+    Tensor(std::vector<ulong> shapea, DataType value)
     {
         // call the other constructor
 
         this->shape.clear();
-        for (int i = 0; i < shape.size(); i++)
+        for (size_t i = 0; i < shapea.size(); i++)
         {
             // std::cout << "shape: " << shape[i] << std::endl;
-            if (shape[i] > 59605)
+            if (shapea[i] > 5960578998)
             {
-                throw std::runtime_error("Tensor size is too large");
+                // throw std::runtime_error("Tensor size is too large");
+                std::cout << "Tensor size is too large" << std::endl;
             }
-            this->shape.push_back(shape[i]);
+            this->shape.push_back(shapea[i]);
         }
         this->data_size_in_elements = get_data_size_in_elements(this->shape);
         this->data_size_in_bytes = get_data_size_in_bytes();
+        this->total_original_allocated_bytes = this->data_size_in_bytes;
+        assert(this->data_size_in_bytes > 0);
         // make sure alignment is correct to 64 bytes
         // malloc
         this->data = (DataType *)aligned_alloc(ALIGNMENT, this->data_size_in_bytes);
         this->fill(value);
     }
 
-    Tensor(std::vector<uint64_t> shape, DataType *data)
+    Tensor(std::vector<ulong> shapea, DataType *dataa)
     {
         this->shape.clear();
-        for (int i = 0; i < shape.size(); i++)
+        for (size_t i = 0; i < shapea.size(); i++)
         {
-            this->shape.push_back(shape[i]);
+            this->shape.push_back(shapea[i]);
         }
         this->data_size_in_elements = get_data_size_in_elements(this->shape);
         this->data_size_in_bytes = get_data_size_in_bytes();
-        this->data = data;
+        this->total_original_allocated_bytes = this->data_size_in_bytes;
+        this->data = dataa;
     }
 
     // copy constructor
     Tensor(const Tensor<DataType> &tensor)
     {
         this->shape.clear();
-        for (int i = 0; i < tensor.shape.size(); i++)
+        for (size_t i = 0; i < tensor.shape.size(); i++)
         {
             this->shape.push_back(tensor.shape[i]);
         }
         this->data_size_in_elements = tensor.data_size_in_elements;
         this->data_size_in_bytes = tensor.data_size_in_bytes;
         this->data = tensor.data;
+        this->device.device_type.i = tensor.device.device_type.i;
+        this->total_original_allocated_bytes = tensor.total_original_allocated_bytes;
     }
 
-    void add(Tensor<DataType> &tensor, Tensor<DataType> &result)
-    {
-#pragma omp parallel for
-        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
-        {
-            STORE(result.data + i, ADD(LOAD(this->data + i), LOAD(tensor.data + i)));
+    void add(Tensor<float,HVMLCPU> &tensor, Tensor<float,HVMLCPU> &result);
+    void add(Tensor<float,HVMLVULKAN> &tensor, Tensor<float,HVMLVULKAN> &result);
+    void add(Tensor<float,HVMLDYNAMIC> &tensor, Tensor<float,HVMLDYNAMIC> &result){
+        //assert all on same device
+        assert(this->device.device_type.i == tensor.device.device_type.i && this->device.device_type.i == result.device.device_type.i);
+        // dynamic routing
+        if (this->device.device_type.i == KHVMLCPU.i){
+            ((Tensor<float,HVMLCPU>*)this)->add(*(Tensor<float,HVMLCPU>*)&tensor, *(Tensor<float,HVMLCPU>*)&result);
+        }
+        else if (this->device.device_type.i == KHVMLVULKAN.i){
+            ((Tensor<float,HVMLVULKAN>*)this)->add(*(Tensor<float,HVMLVULKAN>*)&tensor, *(Tensor<float,HVMLVULKAN>*)&result);
+        }
+        else{
+            std::cout << "device add not implemented yet" << std::endl;
         }
     }
-
-    void add(Tensor<DataType> &tensor)
-    {
-#pragma omp parallel for
-        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
-        {
-            STORE(this->data + i, ADD(LOAD(this->data + i), LOAD(tensor.data + i)));
-        }
-    }
+    
 
     void multiply(Tensor<DataType> &tensor, Tensor<DataType> &result)
     {
-#pragma omp parallel for
-        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        if (this->device.device_type.i == KHVMLCPU.i){
+// #pragma omp parallel for
+        for (ulong i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(result.data + i, MULTIPLY(LOAD(this->data + i), LOAD(tensor.data + i)));
+        }
+        }
+        else{
+            auto stream_id = 0;
+            const int CHUNKSIZE = 256;
+            auto kernalparams = vuda::dim3(this->data_size_in_elements/CHUNKSIZE, 1, 1);
+            vuda::launchKernel("./shaders/multiply.glsl.spv", "main", stream_id, kernalparams, this->data_size_in_elements, CHUNKSIZE, this->data, tensor.data, result.data);
+            vuda::streamSynchronize(stream_id);
         }
     }
 
     void multiply(float input, Tensor<DataType> &result)
     {
-#pragma omp parallel for
-        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        if (this->device.device_type.i == KHVMLCPU.i){
+        // #pragma omp parallel for
+        for (ulong i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(result.data + i, MULTIPLY(LOAD(this->data + i), SET1(input)));
         }
-    }
-
-    void multiply(Tensor<DataType> &tensor)
-    {
-#pragma omp parallel for
-        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
-        {
-            STORE(this->data + i, MULTIPLY(LOAD(this->data + i), LOAD(tensor.data + i)));
+        }
+        else{
+            auto stream_id = 0;
+            const int CHUNKSIZE = 256;
+            auto kernalparams = vuda::dim3(this->data_size_in_elements/CHUNKSIZE, 1, 1);
+            vuda::launchKernel("./shaders/multiply1.glsl.spv", "main", stream_id, kernalparams, this->data_size_in_elements, CHUNKSIZE,input, this->data, result.data);
+            vuda::streamSynchronize(stream_id);
         }
     }
 
-    void multadd(Tensor<DataType> &tensor1, Tensor<DataType> &tensor2, Tensor<DataType> &result)
-    {
-#pragma omp parallel for
-        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
-        {
-            STORE(result.data + i, MULTADD(LOAD(this->data + i), LOAD(tensor1.data + i), LOAD(tensor2.data + i)));
-        }
-    }
+   
 
-    void multadd(Tensor<DataType> &tensor1, Tensor<DataType> &tensor2)
-    {
-#pragma omp parallel for
-        for (uint64_t i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
-        {
-            STORE(this->data + i, MULTADD(LOAD(this->data + i), LOAD(tensor1.data + i), LOAD(tensor2.data + i)));
-        }
-    }
-
-    void reshape(std::vector<uint64_t> new_shape)
+    void reshape(std::vector<ulong> new_shape)
     {
 
         this->shape.clear();
         ulong newsize = 1;
-        for (int i = 0; i < new_shape.size(); i++)
+        for (size_t i = 0; i < new_shape.size(); i++)
         {
             this->shape.push_back(new_shape[i]);
             newsize *= new_shape[i];
@@ -264,18 +485,100 @@ public:
         this->data_size_in_bytes = get_data_size_in_bytes();
     }
 
-    void unsafereshape(std::vector<uint64_t> new_shape)
+    void unsafereshape(std::vector<ulong> new_shape)
     {
 
         this->shape.clear();
         ulong newsize = 1;
-        for (int i = 0; i < new_shape.size(); i++)
+        for (size_t i = 0; i < new_shape.size(); i++)
         {
             this->shape.push_back(new_shape[i]);
             newsize *= new_shape[i];
         }
         this->data_size_in_elements = newsize;
         this->data_size_in_bytes = get_data_size_in_bytes();
+    }
+
+    void matmul(Tensor<float,HVMLVULKAN> &in, Tensor<float,HVMLVULKAN> &result)
+    {
+        auto A = this->data;
+        auto B = in.data;
+        auto C = result.data;
+
+        // Dimensions
+        const long IN = in.shape[2];
+        const long OUT = result.shape[2];
+
+        long BBT = 1;
+
+        if (in.shape.size() > 1)
+        {
+            for (int i = in.shape.size() - 2; i >= 0; i--)
+            {
+                BBT *= in.shape[i];
+            }
+        }
+
+        // confirm result length
+        this->data_size_in_bytes = get_data_size_in_bytes();
+        // std::cout << "result.data_size_in_elements: " << result.data_size_in_elements << std::endl;
+
+        assert(result.data_size_in_elements == BBT * OUT);
+
+        // Parallel computation using vulkan
+
+
+        const int stream_id = 0;
+
+        const int BLOCKSIZE = 1;
+
+        assert(OUT % BLOCKSIZE == 0);
+
+        auto kernalparams = vuda::dim3(BBT, OUT, 1);
+        vuda::launchKernel("./shaders/matmul.glsl.spv", "main", stream_id, kernalparams, BBT,IN,OUT, BLOCKSIZE, B, A, C);
+        
+        vuda::streamSynchronize(stream_id);
+    }
+
+    void matmul(Tensor<float,HVMLVULKAN> &aor,Tensor<float,HVMLVULKAN> &aoo,Tensor<float,HVMLVULKAN> &in, Tensor<float,HVMLVULKAN> &result)
+    {
+        result.fill(0.0f);
+        uint8_t* A = (uint8_t*)this->data;
+        float* Ar = (float*)aor.data;
+        float* Ao = (float*)aoo.data;
+        float* B = (float*)in.data;
+        float* C = (float*)result.data;
+
+        // Dimensions
+        const long IN = in.shape[2];
+        const long OUT = result.shape[2];
+
+        // std::cout << "IN: " << IN << std::endl;
+        // std::cout << "OUT: " << OUT << std::endl;
+
+        long BBT = in.shape[0] * in.shape[1];
+
+       
+
+        // confirm result length
+        // std::cout << "result.data_size_in_elements: " << result.data_size_in_elements << std::endl;
+
+        // assert(result.data_size_in_elements == BBT * OUT);
+        // std::cout << "BBT: " << BBT << std::endl;
+        // Parallel computation using vulkan
+       
+        const int stream_id = 0;
+
+        const int BLOCKSIZE = 64;
+
+        assert(OUT % BLOCKSIZE == 0);
+
+        
+
+        auto kernalparams = vuda::dim3(BBT, OUT/(32), IN/(32));
+        vuda::launchKernel("./shaders/matmul8.glsl.spv", "main", stream_id, kernalparams, BBT,IN,OUT, BLOCKSIZE, B, A, Ar, Ao, C);
+        
+        vuda::streamSynchronize(stream_id);
     }
 
     void matmul(Tensor<float> &in, Tensor<float> &result, bool thisisbf16 = false)
@@ -313,7 +616,7 @@ public:
         {
             bfloat16 *A = (bfloat16 *)this->data;
 // Parallel computation
-#pragma omp parallel for collapse(2) schedule(dynamic, 256) shared(A, B, C)
+// #pragma omp parallel for collapse(2) schedule(dynamic, 32) shared(A, B, C)
             for (long i = 0; i < OUT; i += 1)
             {
 
@@ -321,7 +624,7 @@ public:
                 {
 
                     auto acc = SET1(0.0f);
-#pragma unroll(16)
+// #pragma unroll(16)
                     for (long k = 0; k < IN; k += 32) // let intrinsics handle the unrolling
                     {
 
@@ -338,7 +641,7 @@ public:
         {
             float *A = (float *)this->data;
 // Parallel computation for float tensors
-#pragma omp parallel for collapse(2) schedule(dynamic, 256) shared(A, B, C)
+// #pragma omp parallel for collapse(2) schedule(dynamic, 32) shared(A, B, C)
             for (long i = 0; i < OUT; i += 1)
             {
 
@@ -346,7 +649,7 @@ public:
                 {
 
                     auto acc = SET1(0.0f);
-#pragma unroll(16)
+// #pragma unroll(16)
                     for (long k = 0; k < IN; k += 32) // let intrinsics handle the unrolling
                     {
 
@@ -360,79 +663,39 @@ public:
             }
         }
     }
-    void matmul(Tensor<float> &Art, Tensor<float> &Aot,
-                Tensor<float> &Bt, Tensor<float> &Ct)
-    {
-        // Pointers to the data
-        u_char *A = (u_char *)this->data;
-        auto Ar = Art.data;
-        auto Ao = Aot.data;
-        auto B = Bt.data;
-        auto C = Ct.data;
 
-        long BB = Bt.shape[0];
-        long T = Bt.shape[1];
-        long IN = Bt.shape[2];
-        long OUT = Ct.shape[2];
-
-// Parallel computation
-#pragma omp parallel for collapse(2) schedule(dynamic, UINT8THREADALLOC) shared(A, Ar, Ao, B, C)
-
-        for (long bbj = 0; bbj < BB * T; bbj += 1)
-        {
-            for (long i = 0; i < OUT; i += 8)
-            {
-
-                // __m128 testacc = _mm128_setzero_ps();
-                auto acc = UINT8ACC;
-                auto acc2 = UINT8ACC;
-                auto acc3 = UINT8ACC;
-                auto acc4 = UINT8ACC;
-                auto acc5 = UINT8ACC;
-                auto acc6 = UINT8ACC;
-                auto acc7 = UINT8ACC;
-                auto acc8 = UINT8ACC;
-                auto scale = PREPROCESSFLOATPARAMSUINT8(Ar + i);
-                auto offset = PREPROCESSFLOATPARAMSUINT8(Ao + i);
-
-#pragma unroll(16)
-                for (long k = 0; k < IN; k += UINT8SIMDWIDTH)
-                {
-                    u_int8_t *aink = A + i * IN + k;
-                    auto bbjonk = PREPROCESSFLOATINPUTUINT8(B + bbj * IN + k);
-
-                    acc = UINT8MULTADD(offset, scale, (aink),
-                                       bbjonk, acc, 0);
-                    acc2 = UINT8MULTADD(offset, scale, (aink + IN),
-                                        bbjonk, acc2, 1);
-                    acc3 = UINT8MULTADD(offset, scale, (aink + IN * 2),
-                                        bbjonk, acc3, 2);
-                    acc4 = UINT8MULTADD(offset, scale, (aink + IN * 3),
-                                        bbjonk, acc4, 3);
-                    acc5 = UINT8MULTADD(offset, scale, (aink + IN * 4),
-                                        bbjonk, acc5, 4);
-                    acc6 = UINT8MULTADD(offset, scale, (aink + IN * 5),
-                                        bbjonk, acc6, 5);
-                    acc7 = UINT8MULTADD(offset, scale, (aink + IN * 6),
-                                        bbjonk, acc7, 6);
-                    acc8 = UINT8MULTADD(offset, scale, (aink + IN * 7),
-                                        bbjonk, acc8, 7);
-                }
-
-                *(C + bbj * OUT + i + 7) = UINT8POSTREDUCE(acc8);
-                *(C + bbj * OUT + i + 6) = UINT8POSTREDUCE(acc7);
-                *(C + bbj * OUT + i + 5) = UINT8POSTREDUCE(acc6);
-                *(C + bbj * OUT + i + 4) = UINT8POSTREDUCE(acc5);
-                *(C + bbj * OUT + i + 3) = UINT8POSTREDUCE(acc4);
-                *(C + bbj * OUT + i + 2) = UINT8POSTREDUCE(acc3);
-                *(C + bbj * OUT + i + 1) = UINT8POSTREDUCE(acc2);
-                *(C + bbj * OUT + i + 0) = UINT8POSTREDUCE(acc);
-            }
+    Tensor<DataType, HVMLCPU> cpu () {
+        if (this->device.device_type.i == KHVMLCPU.i){
+            return (Tensor<DataType, HVMLCPU>*)this;
         }
+        else{
+            throw std::runtime_error("Not implemented");
+        }
+        
     }
+
+    void matmul(Tensor<float,HVMLCPU> &Art, Tensor<float,HVMLCPU> &Aot,
+                Tensor<float,HVMLCPU> &Bt, Tensor<float,HVMLCPU> &Ct);
+    void matmul(Tensor<float> &Art, Tensor<float> &Aot,
+                Tensor<float> &Bt, Tensor<float> &Ct){
+                    // test all are on same device
+                    assert(this->device.device_type.i == Art.device.device_type.i && this->device.device_type.i == Aot.device.device_type.i && this->device.device_type.i == Bt.device.device_type.i && this->device.device_type.i == Ct.device.device_type.i);
+                    // dynamic routing
+                    if (this->device.device_type.i == KHVMLCPU.i){
+                        ((Tensor<uint8_t,HVMLCPU>*)this)->matmul(*(Tensor<float,HVMLCPU>*)&Art, *(Tensor<float,HVMLCPU>*)&Aot, *(Tensor<float,HVMLCPU>*)&Bt, *(Tensor<float,HVMLCPU>*)&Ct);
+                    }
+                    else if (this->device.device_type.i == KHVMLVULKAN.i){
+                        ((Tensor<uint8_t,HVMLVULKAN>*)this)->matmul(*(Tensor<float,HVMLVULKAN>*)&Art, *(Tensor<float,HVMLVULKAN>*)&Aot, *(Tensor<float,HVMLVULKAN>*)&Bt, *(Tensor<float,HVMLVULKAN>*)&Ct);
+                    }
+                    else{
+                        std::cout << "device matmul not implemented yet" << std::endl;
+                    }
+                }
+    
     DataType sum()
     {
         DataType sum = 0;
+        // #pragma omp parallel for
         for (int i = 0; i < this->data_size_in_elements; i++)
         {
             sum += this->data[i];
@@ -500,25 +763,32 @@ public:
         // std::cout << "buffer.data_size_in_bytes: " << buffer.data_size_in_bytes << std::endl;
 
         // Parallel computation
-        // #pragma omp parallel for collapse(2) schedule(dynamic, 256) shared(A, B)
-        for (long i = 0; i < BATCH; i += 1)
+        // #pragma omp parallel for collapse(2) schedule(dynamic, 32) shared(A, B)
+        if(buffer.device.device_type.i == KHVMLCPU.i){
+        // #pragma omp parallel for
+        for (u_int64_t i = 0; i < BATCH; i += 1)
         {
 
-            for (long j = 0; j < T; j += 1)
+            for (u_int64_t j = 0; j < T; j += 1)
             {
 
-                for (long k = 0; k < OUT; k += SIMD_WIDTH)
+                for (u_int64_t k = 0; k < OUT; k += SIMD_WIDTH)
                 {
                     auto acc = LOAD(A + indicies[i][j] * OUT + k);
                     STORE(&buffer.data[i * T * OUT + j * OUT + k], acc);
                 }
             }
+        }}
+        else{
+            // Parallel computation
+            std::cout << "Gather on GPU not implemented yet" << std::endl;
         }
     }
 
-    void layernorm(const Tensor<DataType> &weight, const Tensor<DataType> &bias, const Tensor<DataType> &result)
+    template <typename T>
+    void layernorm(const Tensor<DataType,T> &weight, const Tensor<DataType,T> &bias, const Tensor<DataType,T> &result, float eps = 1e-5)
     {
-        uint64_t BTT = 1;
+        ulong BTT = 1;
 
         if (this->shape.size() > 1)
         {
@@ -528,7 +798,7 @@ public:
             }
         }
 
-        uint64_t OUT = this->shape[this->shape.size() - 1];
+        ulong OUT = this->shape[this->shape.size() - 1];
 
         // confirm result length
         // std::cout << "result.data_size_in_elements: " << result.data_size_in_elements << std::endl;
@@ -543,35 +813,54 @@ public:
         auto B = bias.data;
         auto C = result.data;
 
-        for (uint64_t i = 0; i < BTT; i += 1)
-        {
-            float mean = 0.0f;
-            float var = 0.0f;
-            for (uint64_t j = 0; j < OUT; j += SIMD_WIDTH)
-            {
-                mean += REDUCE(LOAD(A + i * OUT + j));
-            }
-            mean /= OUT;
 
-            for (uint64_t j = 0; j < OUT; j += SIMD_WIDTH)
+        assert((this->device.device_type.i + weight.device.device_type.i + bias.device.device_type.i + result.device.device_type.i) % 4 == 0); // assert all tensors are on the same device
+        // std::cout << "devicemap: " << devicemap << std::endl;
+        if (this->device.device_type.i == KHVMLCPU.i){
+            // #pragma omp parallel for
+            for (ulong i = 0; i < BTT; i += 1)
             {
-                auto acc = ADD(LOAD(A + i * OUT + j), SET1(-1.0f * mean));
-                acc = MULTIPLY(acc, acc);
-                var += REDUCE(acc);
-            }
-            var /= OUT;
+                float mean = 0.0f;
+                float var = 0.0f;
+                for (ulong j = 0; j < OUT; j += SIMD_WIDTH)
+                {
+                    mean += REDUCE(LOAD(A + i * OUT + j));
+                }
+                mean /= OUT;
 
-            for (uint64_t j = 0; j < OUT; j += SIMD_WIDTH)
-            {
-                // std::cout << "level1: " <<j<< std::endl;
-                auto acc = ADD(LOAD(A + i * OUT + j), SET1(-1.0f * mean));
-                // std::cout << "level1mm: " <<j<< std::endl;
-                acc = MULTIPLY(acc, SET1(1.0f / sqrt(var + 1e-5)));
-                // std::cout << "level1acc: " <<j<< std::endl;
+                for (ulong j = 0; j < OUT; j += SIMD_WIDTH)
+                {
+                    auto acc = ADD(LOAD(A + i * OUT + j), SET1(-1.0f * mean));
+                    acc = MULTIPLY(acc, acc);
+                    var += REDUCE(acc);
+                }
+                var /= OUT;
 
-                STORE(C + i * OUT + j, MULTADD(LOAD(W + j), acc, LOAD(B + j)));
-                // std::cout << "level1store: " <<j<< std::endl;
+                for (ulong j = 0; j < OUT; j += SIMD_WIDTH)
+                {
+                    // std::cout << "level1: " <<j<< std::endl;
+                    auto acc = ADD(LOAD(A + i * OUT + j), SET1(-1.0f * mean));
+                    // std::cout << "level1mm: " <<j<< std::endl;
+                    acc = MULTIPLY(acc, SET1(1.0f / sqrt(var + eps)));
+                    // std::cout << "level1acc: " <<j<< std::endl;
+
+                    STORE(C + i * OUT + j, MULTADD(LOAD(W + j), acc, LOAD(B + j)));
+                    // std::cout << "level1store: " <<j<< std::endl;
+                }
             }
+        }else{
+            // Parallel computation
+            const int stream_id = 0;
+            // std::cout << "BTT: " << BTT << std::endl;
+
+            const int BLOCKSIZE = 32;
+
+            assert(OUT % BLOCKSIZE == 0);
+
+            auto kernalparams = vuda::dim3(BTT, 1, 1);
+            vuda::launchKernel("./shaders/layernorm.glsl.spv", "main", stream_id, kernalparams, BTT,OUT, BLOCKSIZE, A, W, B, C);
+            
+            vuda::streamSynchronize(stream_id);
         }
     }
 
@@ -582,14 +871,33 @@ public:
         auto B = tensor2.data;
         auto C = result.data;
 
+        result.unsafereshape(tensor2.shape);
+
         // Dimensions
 
         auto IN = this->shape[0];
 
-#pragma omp parallel for schedule(static, 256)
-        for (long i = 0; i < result.data_size_in_elements; i += SIMD_WIDTH)
+        if (this->device.device_type.i == KHVMLCPU.i){
+            
+
+// #pragma omp parallel for schedule(static, 32)
+        for (ulong i = 0; i < result.data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(C + i, MULTADD(LOAD(B + i), LOAD(this->data + (i % IN)), MULTIPLY(LOAD(A + i), SET1(1.0f) - LOAD(this->data + (i % IN)))));
+        }}
+
+        else{
+            // Parallel computation
+            const int stream_id = 0;
+
+            const int BLOCKSIZE = 32;
+
+            const int entries = result.data_size_in_elements;
+
+            auto kernalparams = vuda::dim3(entries/BLOCKSIZE, 1, 1);
+            vuda::launchKernel("./shaders/lerp.glsl.spv", "main", stream_id, kernalparams, entries, BLOCKSIZE, IN, this->data, B, A, C);
+            
+            vuda::streamSynchronize(stream_id);
         }
 
         // Parallel computation
@@ -604,10 +912,51 @@ public:
         // Dimensions
         result.unsafereshape(this->shape);
 
-#pragma omp parallel for schedule(static, 256)
-        for (long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        if (this->device.device_type.i == KHVMLCPU.i){
+
+// #pragma omp parallel for schedule(static, 256)
+        for (ulong i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(C + i, MAX(LOAD(A + i), SET1(0.0f)));
+        }
+        }
+        else{
+            auto stream_id = 0;
+            const int CHUNKSIZE = 128;
+            auto kernalparams = vuda::dim3(this->data_size_in_elements/CHUNKSIZE, 1, 1);
+            vuda::launchKernel("./shaders/relu.spv", "main", stream_id, kernalparams, this->data_size_in_elements, CHUNKSIZE, this->data, result.data);
+            vuda::streamSynchronize(stream_id);
+        }
+
+        // Parallel computation
+    }
+
+    void relusquare(Tensor<DataType> &result)
+    {
+        // Pointers to the data
+        auto A = this->data;
+        auto C = result.data;
+
+        // Dimensions
+        result.unsafereshape(this->shape);
+
+        if (this->device.device_type.i == KHVMLCPU.i){
+
+// #pragma omp parallel for schedule(static, 32)
+        for (ulong i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        {
+            auto a = MAX(LOAD(A + i), SET1(0.0f));
+            STORE(C + i, MULTIPLY(a, a));
+        }
+        }
+        else{
+            auto stream_id = 0;
+            const auto B = this->shape[0];
+            const auto T = this->shape[1];
+            const auto CC = this->shape[2];
+            auto kernalparams = vuda::dim3(B, T, 1);
+            vuda::launchKernel("./shaders/relusquare.glsl.spv", "main", stream_id, kernalparams, B,T,CC, this->data, result.data);
+            vuda::streamSynchronize(stream_id);
         }
 
         // Parallel computation
@@ -623,109 +972,95 @@ public:
         result.unsafereshape(this->shape);
 
         // std::cout << "result.sigmoid.data_size_in_elements: " << result.data_size_in_elements << std::endl;
-
-#pragma omp parallel for schedule(static, 256)
-        for (long i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+if (this->device.device_type.i == KHVMLCPU.i){
+// #pragma omp parallel for schedule(static, 32)
+        for (ulong i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
             STORE(C + i, DIVIDE(SET1(1.0f), ADD(SET1(1.0f), EXP(MULTIPLY(SET1(-1.0f), LOAD(A + i))))));
+        }
+        }else{
+            auto stream_id = 0;
+            const int CHUNKSIZE = 256;
+            auto kernalparams = vuda::dim3(this->data_size_in_elements/CHUNKSIZE, 1, 1);
+            vuda::launchKernel("./shaders/sigmoid.glsl.spv", "main", stream_id, kernalparams, this->data_size_in_elements, CHUNKSIZE, this->data, result.data);
+            vuda::streamSynchronize(stream_id);
         }
         // Parallel computation
     }
 
-    void wkv5(Tensor<float> &r, Tensor<float> &k, Tensor<float> &v, Tensor<float> &w, Tensor<float> &u, Tensor<float> &y)
+    void sigmoidmult(Tensor<DataType> &mult,Tensor<DataType> &result)
     {
+        // Pointers to the data
+        auto A = this->data;
+        auto B = mult.data;
+        auto C = result.data;
 
-        auto rr = r.data;
-        auto kk = k.data;
-        auto vv = v.data;
-        auto ww = w.data;
-        auto uu = u.data;
-        auto ss = this->data;
-        auto out = y.data;
+        // Dimensions
+        result.unsafereshape(this->shape);
 
-        int64_t B = r.shape[0];
-        int64_t T = r.shape[1];
-        int64_t C = r.shape[2];
-        int64_t H = this->shape[1];
-
-        // 1d
-        int64_t bsize = H * T * (C / H);
-        // 2d
-        int64_t bbsize = H * T * (C / H) * (C / H);
-
-        // 1d tensor
-        int64_t tsize = H * (C / H);
-        // 2d tensor
-        int64_t ttsize = H * (C / H) * (C / H);
-
-        // 1d
-        int64_t hsize = (C / H);
-        // 2d
-        int64_t hhsize = (C / H) * (C / H);
-
-#pragma omp parallel for collapse(2) schedule(guided, 64) shared(kk, vv, ww, uu, rr, ss, out)
-        for (int64_t bb = 0; bb < B; bb++)
+        // std::cout << "result.sigmoid.data_size_in_elements: " << result.data_size_in_elements << std::endl;
+if (this->device.device_type.i == KHVMLCPU.i){
+// #pragma omp parallel for
+        for (ulong i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
         {
-            for (int64_t t = 0; t < T; t++)
-            {
-                for (int64_t hh = 0; hh < H; hh++)
-                {
-                    for (int64_t i = 0; i < C / H; i++)
-                    {
+            STORE(C + i,DIVIDE(LOAD(B+i), ADD(SET1(1.0f), EXP(MULTIPLY(SET1(-1.0f), LOAD(A + i))))));
+        }
+        }else{
+            auto stream_id = 0;
+            const int CHUNKSIZE = 256;
+            auto kernalparams = vuda::dim3(this->data_size_in_elements/CHUNKSIZE, 1, 1);
+            vuda::launchKernel("./shaders/sigmoidmult.glsl.spv", "main", stream_id, kernalparams, this->data_size_in_elements, CHUNKSIZE, this->data, mult.data, result.data);
+            vuda::streamSynchronize(stream_id);
+        }
+        // Parallel computation
+    }
 
-                        auto btimeoffset = bb * bsize;
-                        auto timeoffset = btimeoffset + t * tsize;
-                        auto bbhsize = bb * bbsize;
+    void swishmult(Tensor<DataType> &mult,Tensor<DataType> &result)
+    {
+        // Pointers to the data
+        auto A = this->data;
+        auto B = mult.data;
+        auto C = result.data;
 
-                        auto hoffset = hh * hsize;
-                        auto bhofseti = timeoffset + hoffset;
-                        auto bbhhsize = bbhsize + hh * hhsize;
+        // Dimensions
+        result.unsafereshape(this->shape);
 
-                        int64_t iind = bhofseti + i;
-                        auto hoffseti = hoffset + i;
-                        auto bbhhofseti = bbhhsize + i * hsize;
-
-                        // auto kkk = kk[iind];
-                        auto kkk = SET1(kk[iind]);
-                        auto uuu = SET1(uu[hoffseti]);
-                        auto rrr = SET1(rr[iind]);
-                        auto www = SET1(ww[hoffseti]);
-
-                        for (int64_t j = 0; j < C / H; j += SIMD_WIDTH)
-                        {
-                            int64_t jind = bhofseti + j;
-                            int64_t sind = bbhhofseti + j;
-
-                            // atu = k[t,bb,hh,i]*v[t,bb,hh,j]
-                            auto vvv = LOAD(&vv[jind]);
-
-                            // multiply kkk and vvv
-                            auto atu = MULTIPLY(vvv, kkk);
-
-                            auto sss = LOAD(&ss[sind]);
-
-                            // out[t,bb,hh,j] += r[t,bb,hh,i]*(s[bb,hh,i,j] + atu*u[hh,i] )
-                            auto sssatuuuu = MULTADD(atu, uuu, sss);
-
-                            auto outtt = LOAD(&out[jind]);
-
-                            STORE(&out[jind], MULTADD(sssatuuuu, rrr, outtt));
-
-                            // s[bb,hh,i,j] = s[bb,hh,i,j] * w[hh,i] + atu
-                            STORE(&ss[sind], MULTADD(sss, www, atu));
-                        }
-                    }
-                }
-            }
+        // std::cout << "result.sigmoid.data_size_in_elements: " << result.data_size_in_elements << std::endl;
+if (this->device.device_type.i == KHVMLCPU.i){
+// #pragma omp parallel for
+        for (ulong i = 0; i < this->data_size_in_elements; i += SIMD_WIDTH)
+        {
+            STORE(C + i,DIVIDE(MULTIPLY(LOAD(B+i),LOAD(A + i)), ADD(SET1(1.0f), EXP(MULTIPLY(SET1(-1.0f), LOAD(A + i))))));
+        }
+        }else{
+            auto stream_id = 0;
+            const int CHUNKSIZE = 256;
+            auto kernalparams = vuda::dim3(this->data_size_in_elements/CHUNKSIZE, 1, 1);
+            vuda::launchKernel("./shaders/swishmult.glsl.spv", "main", stream_id, kernalparams, this->data_size_in_elements, CHUNKSIZE, this->data, mult.data, result.data);
+            vuda::streamSynchronize(stream_id);
+        }
+        // Parallel computation
+    }
+    void wkv5(Tensor<float,HVMLVULKAN> &r, Tensor<float,HVMLVULKAN> &k, Tensor<float,HVMLVULKAN> &v, Tensor<float,HVMLVULKAN> &w, Tensor<float,HVMLVULKAN> &u, Tensor<float,HVMLVULKAN> &y);
+    void wkv5(Tensor<float,HVMLCPU> &r, Tensor<float,HVMLCPU> &k, Tensor<float,HVMLCPU> &v, Tensor<float,HVMLCPU> &w, Tensor<float,HVMLCPU> &u, Tensor<float,HVMLCPU> &y);
+    void wkv5(Tensor<float,HVMLDYNAMIC> &r, Tensor<float,HVMLDYNAMIC> &k, Tensor<float,HVMLDYNAMIC> &v, Tensor<float,HVMLDYNAMIC> &w, Tensor<float,HVMLDYNAMIC> &u, Tensor<float,HVMLDYNAMIC> &y){
+        if (this->device.device_type.i == KHVMLCPU.i){
+            ((Tensor<float,HVMLCPU>*)this)->wkv5(*(Tensor<float,HVMLCPU>*)&r, *(Tensor<float,HVMLCPU>*)&k, *(Tensor<float,HVMLCPU>*)&v, *(Tensor<float,HVMLCPU>*)&w, *(Tensor<float,HVMLCPU>*)&u, *(Tensor<float,HVMLCPU>*)&y);
+        }
+        else if (this->device.device_type.i == KHVMLVULKAN.i){
+            ((Tensor<float,HVMLVULKAN>*)this)->wkv5(*(Tensor<float,HVMLVULKAN>*)&r, *(Tensor<float,HVMLVULKAN>*)&k, *(Tensor<float,HVMLVULKAN>*)&v, *(Tensor<float,HVMLVULKAN>*)&w, *(Tensor<float,HVMLVULKAN>*)&u, *(Tensor<float,HVMLVULKAN>*)&y);
+        }
+        else{
+            std::cout << "device wkv5 not implemented yet" << std::endl;
         }
     }
 
     // [] operator
-    Tensor<DataType> operator[](const uint64_t index)
+    Tensor<DataType> operator[](const ulong index)
     {
-        uint64_t stride = 1;
-        std::vector<uint64_t> new_shape = {};
-        for (int i = 1; i < this->shape.size(); i++)
+        ulong stride = 1;
+        std::vector<ulong> new_shape = {};
+        for (size_t i = 1; i < this->shape.size(); i++)
         {
             stride *= this->shape[i];
             new_shape.push_back(this->shape[i]);
@@ -735,29 +1070,59 @@ public:
     }
 
     // << operator for printing
-    friend std::ostream &operator<<(std::ostream &os, const Tensor<DataType> &tensor)
+    friend std::ostream &operator<<(std::ostream &os, const Tensor &tensor)
     {
+        DataType* outdata;
+
+        if (tensor.device.device_type.i == KHVMLCPU.i)
+        {
+            outdata = tensor.data;
+        }
+        else
+        {
+            outdata = (DataType *)aligned_alloc(ALIGNMENT, tensor.data_size_in_bytes);
+            auto error = cudaMemcpy(outdata, tensor.data, tensor.data_size_in_bytes, cudaMemcpyDeviceToHost);
+
+            if (error != cudaSuccess)
+            {
+                std::cout << "cudaMemcpy failed: " << cudaGetErrorString(error) << std::endl;
+            }
+        }
+
         if (tensor.shape.size() == 0)
         {
-            os << tensor.data[0];
+            os << outdata[0];
             return os;
         }
 
         os << "Tensor(";
-        for (int i = 0; i < std::min(tensor.data_size_in_elements, 8UL); i++)
+        for (ulong i = 0; i < std::min(tensor.data_size_in_elements, 4UL); i++)
         {
-            os << tensor.data[i];
+            os << outdata[i];
             if (i != tensor.data_size_in_elements - 1)
             {
                 os << ", ";
             }
         }
-        if (tensor.data_size_in_elements > 8)
+        if (tensor.data_size_in_elements > 4)
         {
             os << ", ...";
+            if (tensor.data_size_in_elements > 8)
+            {
+                os << ", ";
+                for (ulong i = tensor.data_size_in_elements - 4; i < tensor.data_size_in_elements; i++)
+                {
+                    os << outdata[i];
+                    if (i != tensor.data_size_in_elements - 1)
+                    {
+                        os << ", ";
+                    }
+                }
+            }
+
         }
         os << ", shape=(";
-        for (int i = 0; i < tensor.shape.size(); i++)
+        for (ulong i = 0; i < tensor.shape.size(); i++)
         {
             os << tensor.shape[i];
             if (i != tensor.shape.size() - 1)
@@ -779,6 +1144,18 @@ public:
         }
         return this->data[0];
     }
+
+    // cvt from HVMLVULKAN to HVMLDYNAMIC
+    operator Tensor<DataType, HVMLDYNAMIC>()
+    {
+        return Tensor<DataType, HVMLDYNAMIC>(this->shape, this->data);
+    }
+
+    
 };
 
+#include "hvml/operations/avx512/matmul8.hpp"
+#include "hvml/operations/generic/genericadd.hpp"
+#include "hvml/operations/vulkan/vulkanadd.hpp"
+#include "hvml/operations/vulkan/vulkanwkv5.hpp"
 #endif
